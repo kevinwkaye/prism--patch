@@ -145,10 +145,13 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void showGesture (bool active, float value);
+    void setValueText (const juce::String& t) { if (t != valueText) { valueText = t; repaint(); } }
+    juce::String getId() const { return id; }
 
 private:
     PrismProcessor& proc;
     juce::Slider slider;
+    juce::String valueText;
     juce::RangedAudioParameter* param = nullptr;
     juce::String id, caption;
     int knobSize;
@@ -210,7 +213,8 @@ private:
     std::unique_ptr<Dial> knobDial, amountDial, deepA, deepB;
     std::unique_ptr<Pills> mainPills;           // Texture's filter style
     std::unique_ptr<Pills> deepPills, deepPills2;
-    std::unique_ptr<ToggleChip> deepToggle1, deepToggle2, deepToggle3;
+    std::unique_ptr<ToggleChip> deepToggle1, deepToggle2, deepToggle3, syncToggle;
+    bool lastOn = true;
     std::unique_ptr<ActionChip> deepAction;
     std::unique_ptr<MenuChip> deepMenu;
     std::unique_ptr<LabelledSlider> deepSlider1, deepSlider2;

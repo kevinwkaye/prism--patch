@@ -160,7 +160,8 @@ pp::EngineParams PrismProcessor::readParams (int numSamples)
     p.captureQuantise = on (ParamIDs::captureQuantise);
     p.shared.fs = (float) engine.sampleRate();
     p.shared.bpm = bpm;
-    p.shared.tempoLocked = synced || tapLocked;
+    p.shared.rateLocked = on (ParamIDs::rateSync);
+    p.shared.timeLocked = on (ParamIDs::timeSync);
     p.shared.sens = f (ParamIDs::sens);
     p.shared.filterStyle = idx (ParamIDs::filterStyle);
     p.shared.inputMode = idx (ParamIDs::inputMode);
@@ -542,17 +543,34 @@ void PrismProcessor::dualBypass()
 void PrismProcessor::captureDown()
 {
     focused.store (this);
+    const int st = engine.getCapture().uiState.load();
+    if (capLatched && st == pp::Capture::Recording)
+    {
+        // second click after a quick click: stop recording and play
+        engine.postCommand (pp::PrismEngine::CmdCaptureRelease);
+        capLatched = false;
+        capDownAt = -1.0;
+        return;
+    }
+    capLatched = false;
     capDownAt = Time::getMillisecondCounterHiRes() * 0.001;
     capHeldFired = false;
-    capStartedOnDown = captureIdle (engine.getCapture().uiState.load());
+    capStartedOnDown = captureIdle (st);
     if (capStartedOnDown) engine.postCommand (pp::PrismEngine::CmdCaptureHold);
 }
 
 void PrismProcessor::captureUp()
 {
     if (capDownAt <= 0.0) return;
-    if (capStartedOnDown || capHeldFired) engine.postCommand (pp::PrismEngine::CmdCaptureRelease);
-    else engine.postCommand (pp::PrismEngine::CmdCaptureClear);
+    const double held = Time::getMillisecondCounterHiRes() * 0.001 - capDownAt;
+    if (capStartedOnDown && held < 0.35)
+    {
+        // a quick click keeps recording until the next click
+        capLatched = true;
+        say ("RECORDING, CLICK AGAIN TO STOP");
+    }
+    else if (capStartedOnDown || capHeldFired) engine.postCommand (pp::PrismEngine::CmdCaptureRelease);
+    else { engine.postCommand (pp::PrismEngine::CmdCaptureClear); say ("CAPTURE CLEARED"); }
     capDownAt = -1.0;
     capHeldFired = capStartedOnDown = false;
 }
@@ -568,6 +586,9 @@ void PrismProcessor::tap()
         const double avg = (taps.back() - taps.front()) / (double) (taps.size() - 1);
         setPlain (ParamIDs::bpm, (float) jlimit (40.0, 240.0, 60.0 / avg));
         setPlain (ParamIDs::sync, 0.0f); // tapping takes over from Ableton's tempo
+        // as on the pedal, a tapped tempo makes Rate and Time snap to note values
+        setPlain (ParamIDs::rateSync, 1.0f);
+        setPlain (ParamIDs::timeSync, 1.0f);
         tapLocked = true;
         say ("TEMPO " + String (roundToInt (60.0 / avg)) + " BPM");
     }

@@ -107,14 +107,14 @@ struct Envelope
     void reset() { env = 0.0f; }
 };
 
-// First order all-pass, coefficient set from a cutoff
+// First order all-pass, H(z) = (a + z^-1) / (1 + a z^-1), with a = (t - 1) / (t + 1)
 struct Allpass1
 {
     float z = 0.0f;
     float process (float x, float a)
     {
-        const float y = -a * x + z;
-        z = x + a * y;
+        const float y = a * x + z;
+        z = x - a * y;
         return y;
     }
     void reset() { z = 0.0f; }

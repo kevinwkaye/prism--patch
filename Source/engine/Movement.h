@@ -20,6 +20,8 @@ public:
         {
             auto& k = ch[c];
             k.d.init (nextPow2 ((int) (0.12f * fs)));
+            k.d2.init (nextPow2 ((int) (0.12f * fs)));
+            k.flutter.seed (0xF00Du + 7u * (uint32_t) c, 0.4f);
             k.shift.prepare (fs);
             k.lfo.seed (0x1234u + 77u * (uint32_t) c, c * 0.25f);
             k.wow.seed (0xBEEFu + 31u * (uint32_t) c, 0.1f + c * 0.37f);
@@ -34,7 +36,7 @@ public:
 
     void reset()
     {
-        for (auto& k : ch) { k.d.clear(); k.shift.clear(); for (auto& a : k.ap) a.reset(); k.fb = 0.0f; k.tone.reset(); }
+        for (auto& k : ch) { k.d.clear(); k.d2.clear(); k.shift.clear(); for (auto& a : k.ap) a.reset(); k.fb = 0.0f; k.tone.reset(); }
         blip = blipTarget = 0.0f;
     }
 
@@ -71,11 +73,15 @@ public:
             {
                 case Doubler:
                 {
-                    // Rate sets the doubling time: tight double to short slapback
-                    const float base = (0.006f + 0.054f * knob) * fs * (c == 0 ? 1.0f : 1.37f) + (c == 0 ? 0.0f : 0.003f * fs);
-                    const float wander = k.wow.next (0.3f, fs, 1.0f) * 0.0004f * fs;
-                    const float tap = k.tone.process (k.d.tap (base + wander + (c == 0 ? blip : -blip)));
-                    y[c] = v + tap * amt * 0.85f;
+                    // Two overdubbed takes, one each side. Each drifts in time and pitch on its own,
+                    // like a real double. Rate sets the gap: tight double to short slapback.
+                    const float mono = 0.5f * (x[0] + x[1]);
+                    if (c == 0) k.d2.push (mono);
+                    const float base = (0.008f + 0.052f * knob) * fs * (c == 0 ? 1.0f : 1.41f) + (c == 0 ? 0.0f : 0.004f * fs);
+                    const float wander = k.wow.next (c == 0 ? 0.55f : 0.8f, fs, 1.0f) * 0.0012f * fs
+                                       + k.lfo.next (c == 0 ? 4.1f : 3.3f, fs, 1.0f) * 0.00015f * fs;
+                    const float tap = k.tone.process (ch[0].d2.tap (base + wander + (c == 0 ? blip : -blip)));
+                    y[c] = v * (1.0f - 0.3f * amt) + tap * amt * 1.15f;
                     break;
                 }
                 case Vibrato:
@@ -103,13 +109,17 @@ public:
                 }
                 case Tremolo:
                 {
-                    // Amount takes it from soft flutter to a hard square chop
-                    const float wob = drift > 0.0f ? 1.0f + drift * 0.3f * k.wow.next (0.4f, fs, 1.0f) : 1.0f;
-                    const float sn = k.lfo.next (hz * wob, fs, drift * 0.4f);
-                    const float sq = 1.0f + 14.0f * std::max (0.0f, amt - 0.45f) * 2.0f;
-                    const float shape = std::tanh (sq * sn) / std::tanh (sq);
-                    const float depth = std::min (1.0f, amt * 1.6f) * (1.0f - drift * 0.25f * (0.5f + 0.5f * k.wow.next (1.3f, fs, 1.0f)));
-                    y[c] = v * (1.0f - depth * (0.5f - 0.5f * shape));
+                    // Amount takes it from a soft amp shimmer to a hard square chop near the top.
+                    // One LFO for both sides, as on a guitar amp.
+                    if (c == 0)
+                    {
+                        const float wob = drift > 0.0f ? 1.0f + drift * 0.3f * k.wow.next (0.4f, fs, 1.0f) : 1.0f;
+                        const float sn = k.lfo.next (hz * wob, fs, drift * 0.4f);
+                        const float sq = 1.0f + 7.0f * std::max (0.0f, (amt - 0.6f) / 0.4f);
+                        tremShape = std::tanh (sq * sn) / std::tanh (sq);
+                        tremDepth = std::min (1.0f, amt * 1.15f) * (1.0f - drift * 0.25f * (0.5f + 0.5f * k.flutter.next (1.3f, fs, 1.0f)));
+                    }
+                    y[c] = v * (1.0f - tremDepth * (0.5f - 0.5f * tremShape));
                     break;
                 }
                 default: // Pitch
@@ -140,11 +150,11 @@ private:
     };
     struct Chan
     {
-        DelayLine d;
+        DelayLine d, d2;
         PitchShifter shift;
         Crusher crush;
         std::array<Allpass1, kMaxStages> ap;
-        Lfo lfo, wow;
+        Lfo lfo, wow, flutter;
         OnePole tone;
         float fb = 0.0f;
     };
@@ -156,5 +166,6 @@ private:
     Rng rng;
     float blip = 0.0f, blipTarget = 0.0f;
     int blipTimer = 0;
+    float tremShape = 0.0f, tremDepth = 0.0f;
 };
 } // namespace pp

@@ -69,7 +69,7 @@ public:
             {
                 // Time: short slapback to quarter-note taps. With a tempo, note subdivisions.
                 float secs;
-                if (s.tempoLocked)
+                if (s.timeLocked)
                 {
                     static const float sub[6] = { 0.125f, 1.0f / 6.0f, 0.25f, 1.0f / 3.0f, 0.375f, 0.5f };
                     secs = beatSeconds (s) * 2.0f * sub[std::min (5, (int) (knob * 6.0f))];
@@ -154,7 +154,7 @@ public:
             {
                 // A looping delay whose buffer is rewritten as Time moves: knob moves bend and fold the loop
                 float secs;
-                if (s.tempoLocked)
+                if (s.timeLocked)
                 {
                     static const float sub[7] = { 0.0625f, 0.125f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
                     secs = beatSeconds (s) * sub[std::min (6, (int) (knob * 7.0f))];
@@ -184,7 +184,7 @@ public:
             {
                 // Backwards tape: grains read the recent past in reverse at a speed set by Time
                 const float speed = std::pow (2.0f, (knob - 0.5f) * 2.0f) * (1.0f + drift * 0.02f * ch[0].lfo.next (0.6f, fs, 0.7f));
-                const float seg = (s.tempoLocked ? beatSeconds (s) : 0.45f) * fs;
+                const float seg = (s.timeLocked ? beatSeconds (s) : 0.45f) * fs;
                 revPhase += 1.0f / seg;
                 revPhase -= std::floor (revPhase);
                 const float p2 = revPhase + 0.5f - std::floor (revPhase + 0.5f);

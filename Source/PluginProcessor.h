@@ -70,6 +70,7 @@ public:
     bool isLearning() const { return learnTarget != LearnNone; }
     int learningWhat() const { return learnTarget; }
     bool isCalibrating() const { return calibrating; }
+    bool captureLatched() const { return capLatched; }
     enum { LearnNone = -1, LearnExpression = 4 };
 
     // ---- what the panel and Pebble show ----
@@ -152,7 +153,7 @@ private:
     double autoCalUntil = 0.0;
     float autoCalPeak = 0.0f;
     double capDownAt = -1.0;
-    bool capHeldFired = false, capStartedOnDown = false;
+    bool capHeldFired = false, capStartedOnDown = false, capLatched = false;
 
     // bass input keeps its lows dry: Linkwitz-Riley split at 120 Hz
     pp::Biquad bassLp[2][2], bassHp[2][2];

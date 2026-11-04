@@ -301,7 +301,8 @@ void Dial::paint (Graphics& g)
         g.setColour (ff::red);
         g.fillEllipse ((float) top.getCentreX() + w * 0.5f + 5.0f, (float) top.getCentreY() - 3.0f, 6.0f, 6.0f);
     }
-    const String value = gestureActive ? param->getText (gestureValue, 0) : param->getCurrentValueAsText();
+    String value = gestureActive ? param->getText (gestureValue, 0) : param->getCurrentValueAsText();
+    if (valueText.isNotEmpty()) value = valueText;
     ff::label (g, value.toUpperCase(), r.removeFromBottom (20), Justification::centred, ff::ink, 15.0f);
 }
 
@@ -402,6 +403,7 @@ ModuleSection::ModuleSection (PrismProcessor& p, int m)
             deepLabel2 = "GESTURE SPEED";
             deepPills = std::make_unique<Pills> (s, ParamIDs::gestQuant, StringArray { "FREE", "1 BAR", "2 BAR", "4 BAR" }, 12.0f);
             deepPills2 = std::make_unique<Pills> (s, ParamIDs::gestSpeed, StringArray { "1/4", "1/2", "1X", "2X", "4X" }, 12.0f);
+            syncToggle = std::make_unique<ToggleChip> (s, ParamIDs::rateSync, "RATE IS FREE", "RATE FOLLOWS TEMPO", true, 12.0f);
             break;
         case pp::ModDiffusion:
             deepA = std::make_unique<Dial> (p, ParamIDs::driftD, "Drift");
@@ -411,6 +413,7 @@ ModuleSection::ModuleSection (PrismProcessor& p, int m)
             deepToggle1 = std::make_unique<ToggleChip> (s, ParamIDs::captureOverdub, "OVERDUB OFF", "OVERDUB ON", true, 12.0f);
             deepToggle2 = std::make_unique<ToggleChip> (s, ParamIDs::captureQuantise, "FREE LENGTH", "QUANTISE", true, 12.0f);
             deepToggle3 = std::make_unique<ToggleChip> (s, ParamIDs::trails, "BYPASS CUTS TAILS", "BYPASS KEEPS TRAILS", false, 12.0f);
+            syncToggle = std::make_unique<ToggleChip> (s, ParamIDs::timeSync, "TIME IS FREE", "TIME FOLLOWS TEMPO", true, 12.0f);
             break;
         default:
             mainPills = std::make_unique<Pills> (s, ParamIDs::filterStyle, StringArray { "TILT", "LOW PASS", "HIGH PASS" }, 11.0f);
@@ -426,7 +429,7 @@ ModuleSection::ModuleSection (PrismProcessor& p, int m)
     }
     for (Component* c : std::initializer_list<Component*> { knobDial.get(), amountDial.get(), deepA.get(), deepB.get(), mainPills.get(), deepPills.get(),
                                                            deepPills2.get(), deepToggle1.get(), deepToggle2.get(), deepToggle3.get(),
-                                                           deepAction.get(), deepMenu.get(), deepSlider1.get(), deepSlider2.get() })
+                                                           deepAction.get(), deepMenu.get(), deepSlider1.get(), deepSlider2.get(), syncToggle.get() })
         if (c != nullptr) addChildComponent (c);
     setView (View::Main);
 }
@@ -441,7 +444,7 @@ void ModuleSection::setView (View v)
         if (c != nullptr) c->setVisible (main);
     for (Component* c : std::initializer_list<Component*> { deepA.get(), deepB.get(), deepPills.get(), deepPills2.get(), deepToggle1.get(),
                                                            deepToggle2.get(), deepToggle3.get(), deepAction.get(), deepMenu.get(),
-                                                           deepSlider1.get(), deepSlider2.get() })
+                                                           deepSlider1.get(), deepSlider2.get(), syncToggle.get() })
         if (c != nullptr) c->setVisible (deep);
     resized();
     repaint();
@@ -470,8 +473,10 @@ void ModuleSection::resized()
     {
         deepToggle1->setBounds (16, 252, 125, 30);
         deepToggle2->setBounds (149, 252, 125, 30);
-        deepToggle3->setBounds (16, 290, 258, 30);
+        deepToggle3->setBounds (16, 288, 258, 28);
+        syncToggle->setBounds (16, 324, 258, 28);
     }
+    if (module == pp::ModMovement) syncToggle->setBounds (16, 316, 258, 28);
     if (deepMenu)
     {
         deepMenu->setBounds (16, 214, 258, 28);
@@ -503,6 +508,24 @@ void ModuleSection::paint (Graphics& g)
 
 void ModuleSection::tick (double dt)
 {
+    // the dot follows the module's on switch
+    const bool on = raw (proc, ParamIDs::on[module]) > 0.5f;
+    if (on != lastOn) { lastOn = on; repaint(); }
+
+    // Rate and Time show what they really do: Hz or a note value, milliseconds, a room, a speed
+    const int fx = jlimit (0, 5, roundToInt (raw (proc, ParamIDs::fx[module])));
+    if (knobDial && module == pp::ModMovement)
+    {
+        const float k = proc.laneActive (1) ? proc.laneValue (1) : raw (proc, ParamIDs::knob[1]);
+        knobDial->setValueText (fx == 0 ? String (roundToInt (8.0f + 52.0f * k)) + " MS GAP"
+                                        : (fx == 4 ? String ((k - 0.5f) * 24.0f, 1) + " ST" : names::rateText (k, raw (proc, ParamIDs::rateSync) > 0.5f)));
+    }
+    if (knobDial && module == pp::ModDiffusion)
+    {
+        const float k = proc.laneActive (2) ? proc.laneValue (2) : raw (proc, ParamIDs::knob[2]);
+        knobDial->setValueText (names::timeText (fx, k, raw (proc, ParamIDs::timeSync) > 0.5f));
+    }
+
     card.advance (dt);
     card.setValue (names::effects[module][jlimit (0, 5, roundToInt (raw (proc, ParamIDs::fx[module])))].toUpperCase());
     if (knobDial) knobDial->showGesture (proc.laneActive (module), proc.laneValue (module));
@@ -1032,11 +1055,11 @@ void PrismEditor::timerCallback()
     if (proc.gestureRecording()) gestureButton.set ("RECORDING", "MOVE ANY KNOB", ff::red);
     else if (proc.gestureLoops() > 0) gestureButton.set ("PLAYING", String (proc.gestureLoops()) + " LOOPS " + String::fromUTF8 ("· RIGHT-CLICK CLEARS"), ff::ink);
     else gestureButton.set ("GESTURE", "TAP TO RECORD", ff::line);
-    if (cs == pp::Capture::Recording) captureButton.set ("RECORDING", "RELEASE TO LOOP", ff::red);
+    if (cs == pp::Capture::Recording) captureButton.set ("RECORDING", proc.captureLatched() ? "CLICK TO STOP" : "RELEASE TO LOOP", ff::red);
     else if (cs == pp::Capture::Overdubbing) captureButton.set ("OVERDUB", "RELEASE TO PLAY", ff::coral);
     else if (cs == pp::Capture::Pad) captureButton.set ("SUSTAIN PAD", "TAP TO CLEAR", ff::modB);
     else if (cs == pp::Capture::Loop) captureButton.set ("LOOPING", raw (proc, ParamIDs::captureOverdub) > 0.5f ? "HOLD TO OVERDUB" : "TAP TO CLEAR", ff::modG);
-    else captureButton.set ("CAPTURE", "HOLD TO RECORD", ff::line);
+    else captureButton.set ("CAPTURE", "HOLD, OR CLICK TWICE", ff::line);
     const bool bypassed = raw (proc, ParamIDs::bypass) > 0.5f;
     bool allGrouped = true;
     for (int k = 0; k < 4; ++k) allGrouped = allGrouped && raw (proc, ParamIDs::group[k]) > 0.5f;

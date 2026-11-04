@@ -38,6 +38,8 @@ inline constexpr auto spareFx = "spareFx";
 inline constexpr auto spareAmount = "spareAmount";
 inline constexpr auto spareKnob = "spareKnob";
 inline constexpr auto expTarget = "expTarget";
+inline constexpr auto rateSync = "rateSync";
+inline constexpr auto timeSync = "timeSync";
 } // namespace ParamIDs
 
 namespace names
@@ -97,6 +99,54 @@ inline juce::StringArray expTargetNames()
     return s;
 }
 
+// what the Rate and Time knobs really do, for the panel's readouts
+inline juce::String noteName (float beats)
+{
+    struct N { float b; const char* n; };
+    static const N table[] = { { 8, "2 BARS" }, { 4, "1 BAR" }, { 3, "1/2 DOT" }, { 2, "1/2" }, { 1.5f, "1/4 DOT" }, { 1, "1/4" },
+                               { 0.75f, "1/8 DOT" }, { 2.0f / 3.0f, "1/4 TRIP" }, { 0.5f, "1/8" }, { 1.0f / 3.0f, "1/8 TRIP" },
+                               { 0.25f, "1/16" }, { 0.125f, "1/32" }, { 0.0625f, "1/64" } };
+    for (const auto& t : table) if (std::abs (t.b - beats) < 0.01f) return t.n;
+    return juce::String (beats, 2) + " BEATS";
+}
+inline juce::String ms (float seconds)
+{
+    return seconds < 1.0f ? juce::String (juce::roundToInt (seconds * 1000.0f)) + " MS" : juce::String (seconds, 2) + " S";
+}
+inline juce::String rateText (float knob, bool synced)
+{
+    if (synced) return noteName (pp::Sync::beats (knob));
+    const float hz = pp::freeRateHz (knob);
+    return hz < 1.0f ? juce::String (hz, 2) + " HZ" : juce::String (hz, 1) + " HZ";
+}
+inline juce::String timeText (int effect, float knob, bool synced)
+{
+    switch (effect)
+    {
+        case 0: case 1: // Cascade, Reels
+        {
+            static const float sub[6] = { 0.25f, 1.0f / 3.0f, 0.5f, 2.0f / 3.0f, 0.75f, 1.0f };
+            return synced ? noteName (sub[std::min (5, (int) (knob * 6.0f))]) : ms (0.04f * std::pow (12.5f, knob));
+        }
+        case 2:
+        {
+            static const char* const rooms[5] = { "CHAMBER", "ROOM", "PLATE", "HALL", "CLOUD" };
+            return rooms[juce::jlimit (0, 4, juce::roundToInt (knob * 4.0f))];
+        }
+        case 3:
+        {
+            static const float sub[7] = { 0.0625f, 0.125f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
+            return synced ? noteName (sub[std::min (6, (int) (knob * 7.0f))]) : ms (0.03f * std::pow (50.0f, knob));
+        }
+        case 4:
+        {
+            const float speed = std::pow (2.0f, (knob - 0.5f) * 2.0f);
+            return std::abs (speed - 1.0f) < 0.02f ? juce::String ("NORMAL SPEED") : juce::String (speed, 2) + "X SPEED";
+        }
+        default: return "-";
+    }
+}
+
 inline const juce::StringArray gestQuant { "Free", "1 Bar", "2 Bars", "4 Bars" };
 inline const juce::StringArray gestSpeeds { "1/4x", "1/2x", "1x", "2x", "4x" };
 inline constexpr float gestSpeedValue[5] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
@@ -141,9 +191,9 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
         if (std::abs (v - 0.5f) < 0.03f) return String ("Neutral");
         return String (v < 0.5f ? "Dark " : "Bright ") + String (roundToInt (std::abs (v - 0.5f) * 200.0f));
     });
-    knob (ParamIDs::knob[1], "Rate", 0.35f, [] (float v, int)
+    knob (ParamIDs::knob[1], "Rate", 0.5f, [] (float v, int)
     {
-        const float hz = 0.05f * std::pow (240.0f, v);
+        const float hz = pp::freeRateHz (v);
         return hz < 1.0f ? String (hz, 2) + " Hz" : String (hz, 1) + " Hz";
     });
     knob (ParamIDs::knob[2], "Time", 0.5f);
@@ -190,6 +240,10 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     choice (ParamIDs::spareFx, "Spare Slot", names::spareChoices(), 0);
     knob (ParamIDs::spareAmount, "Spare Amount", 0.5f);
     knob (ParamIDs::spareKnob, "Spare Tilt/Rate/Time", 0.5f);
+
+    // ---- tempo sync for Rate and Time, off by default as on the pedal until you tap ----
+    toggle (ParamIDs::rateSync, "Rate Follows Tempo", false);
+    toggle (ParamIDs::timeSync, "Time Follows Tempo", false);
 
     // ---- expression ----
     choice (ParamIDs::expTarget, "Expression Target", names::expTargetNames(), 4);

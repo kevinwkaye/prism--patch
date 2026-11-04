@@ -19,7 +19,8 @@ struct Shared
 {
     float fs = 48000.0f;
     float bpm = 120.0f;
-    bool tempoLocked = false;  // Ableton sync or a tapped tempo: synced effects snap to note values
+    bool rateLocked = false;   // Movement Rate snaps to note values of the tempo
+    bool timeLocked = false;   // Diffusion Time snaps to note values of the tempo
     float sens = 0.5f;         // Character breakup point, 0 cleaner, 1 hotter
     int filterStyle = 0;       // 0 tilt, 1 low-pass, 2 high-pass
     int inputMode = 0;         // 0 guitar, 1 synth, 2 bass
@@ -27,11 +28,14 @@ struct Shared
 
 inline float beatSeconds (const Shared& s) { return 60.0f / std::max (20.0f, s.bpm); }
 
+// Rate knob to Hz when free: 0.1 .. 15 Hz
+inline float freeRateHz (float knob) { return 0.1f * std::pow (150.0f, clampf (knob, 0.0f, 1.0f)); }
+
 // Rate knob to Hz, free or tempo-synced
 inline float rateHz (float knob, const Shared& s)
 {
-    if (s.tempoLocked) return 1.0f / (beatSeconds (s) * Sync::beats (knob));
-    return 0.05f * std::pow (240.0f, clampf (knob, 0.0f, 1.0f)); // 0.05 .. 12 Hz
+    if (s.rateLocked) return 1.0f / (beatSeconds (s) * Sync::beats (knob));
+    return freeRateHz (knob);
 }
 
 // Switching effects inside a module dips to the dry signal for a few milliseconds,

@@ -24,6 +24,7 @@ public:
             k.fm.seed (0x8086u + (uint32_t) c, 0.2f * c);
             k.dc.prepare (fs);
             k.hiss.setCutoff (6000.0f, fs);
+            k.svf3.set (1100.0f, 1.2f, fs);
         }
         comp.set (0.002f, 0.09f, fs);
         aS.setTime (0.02f, fs);
@@ -159,43 +160,69 @@ public:
 
             default: // Interference
             {
-                // telecom glitches and radio static, layered in as Amount rises
-                const float a2 = amt * amt;
-                // packet loss
+                // Three flavours of disturbance blend in as Amount rises:
+                // radio (tuning drift, static, fading), then telecom (low-bitrate codec,
+                // dropouts, stutters), then a mobile phone's pulsing buzz on top.
+                auto bump = [] (float v, float centre, float width) { return clampf (1.0f - std::fabs (v - centre) / width, 0.0f, 1.0f); };
+                const float radio = amt < 0.25f ? std::min (1.0f, amt * 4.0f) : bump (amt, 0.25f, 0.4f);
+                const float tele = bump (amt, 0.6f, 0.35f);
+                const float buzz = clampf ((amt - 0.62f) / 0.3f, 0.0f, 1.0f);
+                const float glitchy = clampf ((amt - 0.35f) / 0.5f, 0.0f, 1.0f);
+
+                // radio: the dial drifts, signal fades in and out under the static
+                const float tune = 0.5f + 0.5f * ch[0].fm.next (0.11f, fs, 1.0f);
+                const float fadeLfo = 0.5f + 0.5f * ch[0].wow.next (0.33f, fs, 1.0f);
+                const float fadeGain = 1.0f - radio * 0.55f * fadeLfo;
+                const float staticLevel = radio * (0.012f + 0.03f * (1.0f - fadeLfo));
+
+                // telecom: lost packets and repeated chunks
                 if (--packetTimer <= 0)
                 {
-                    packetTimer = (int) ((0.01f + 0.03f * rng.uni()) * fs);
-                    packetGain = rng.uni() < a2 * 0.35f ? 0.0f : 1.0f;
+                    packetTimer = (int) ((0.015f + 0.05f * rng.uni()) * fs);
+                    packetGain = rng.uni() < tele * 0.25f + buzz * 0.15f ? 0.0f : 1.0f;
                 }
-                // stutter: capture a short grain and repeat it a few times
-                if (glitchLeft <= 0 && rng.uni() < amt * 2.5f / fs)
+                if (glitchLeft <= 0 && rng.uni() < glitchy * 2.0f / fs)
                 {
-                    glitchLen = (int) ((0.02f + 0.05f * rng.uni()) * fs);
+                    glitchLen = (int) ((0.02f + 0.06f * rng.uni()) * fs);
                     glitchLeft = glitchLen * (2 + (int) (rng.uni() * 4.0f));
                     bufIdx = 0;
                 }
-                // crackle
-                if (rng.uni() < amt * 40.0f / fs) crackle = rng.next() * 0.5f * amt;
-                crackle *= 0.9f;
-                const float sweep = 0.5f + 0.5f * ch[0].fm.next (0.13f, fs, 1.0f);
+                packetSmooth += (packetGain - packetSmooth) * 0.02f;
+
+                // the phone buzz: 217 Hz bursts, in short trains
+                if (--burstTimer <= 0)
+                {
+                    burstOn = ! burstOn && rng.uni() < 0.8f;
+                    burstTimer = (int) ((burstOn ? 0.25f + 0.6f * rng.uni() : 0.3f + 1.2f * rng.uni()) * fs);
+                }
+                buzzPhase += 217.0f / fs;
+                buzzPhase -= std::floor (buzzPhase);
+                const float pulse = buzzPhase < 0.12f ? 1.0f : 0.0f;
+                burstEnv += ((burstOn ? 1.0f : 0.0f) - burstEnv) * 0.01f;
+
                 for (int c = 0; c < 2; ++c)
                 {
                     auto& k = ch[c];
                     float v = x[c];
-                    // narrow the band like a phone line
-                    k.svf.set (1200.0f * std::pow (2.0f, (sweep - 0.5f) * 2.0f), 0.9f, fs);
-                    const float band = k.svf.bpNorm (v);
-                    v = lerpf (v, band * 1.4f, std::min (1.0f, amt * 0.9f));
+                    // narrow the band like a radio being tuned, then like a phone line
+                    k.svf.set (lerpf (1800.0f, 700.0f * std::pow (3.0f, tune), radio) * (1.0f - 0.3f * tele), 0.8f + 0.6f * tele, fs);
+                    const float band = k.svf.bpNorm (v) * 1.5f;
+                    v = lerpf (v, band, std::min (1.0f, radio * 0.75f + tele * 0.9f));
+                    // codec grit
+                    if (tele > 0.01f) v = lerpf (v, k.crush.process (v, 0.18f + 0.3f * (1.0f - tele), 10.0f - 4.0f * tele), tele);
+                    v *= fadeGain;
                     if (glitchLeft > 0)
                     {
                         const int pos = (glitchLen * 8 - glitchLeft) % std::max (1, glitchLen);
-                        if (bufIdx < glitchLen) glitchBuf[c][(size_t) bufIdx] = v;
-                        v = glitchBuf[c][(size_t) std::min (pos, (int) glitchBuf[c].size() - 1)];
+                        if (bufIdx < glitchLen) glitchBuf[(size_t) c][(size_t) bufIdx] = v;
+                        v = glitchBuf[(size_t) c][(size_t) std::min (pos, (int) glitchBuf[(size_t) c].size() - 1)];
                     }
-                    // tuned static
-                    k.svf2.set (2500.0f * (0.5f + sweep), 2.5f, fs);
-                    const float stat = k.svf2.bpNorm (rng.next()) * 0.06f * a2;
-                    y[c] = (v * packetGain + stat + crackle) ;
+                    v *= lerpf (1.0f, packetSmooth, std::max (tele, buzz));
+                    // tuned static between stations
+                    k.svf2.set (2400.0f * (0.6f + tune), 1.8f, fs);
+                    const float stat = k.svf2.bpNorm (rng.next()) * staticLevel + k.hiss.process (rng.next()) * staticLevel * 0.5f;
+                    const float bz = k.svf3.bpNorm (pulse * 2.0f - 0.24f) * buzz * burstEnv * 0.05f;
+                    y[c] = v + stat + bz;
                 }
                 if (glitchLeft > 0) { --glitchLeft; ++bufIdx; }
                 break;
@@ -208,7 +235,8 @@ private:
     struct Chan
     {
         DelayLine d;
-        Svf svf, svf2;
+        Svf svf, svf2, svf3;
+        Crusher crush;
         AdaaTanh sat;
         OnePole lp, hiss;
         Lfo wow, flutter, fm;
@@ -225,7 +253,9 @@ private:
     int brokenTimer = 0;
     float brokenRamp = 0.0f, brokenDepth = 0.0f, brokenPhase = 0.0f;
     int glitchLeft = 0, glitchLen = 0, packetTimer = 0, bufIdx = 0;
-    float packetGain = 1.0f, crackle = 0.0f;
+    float packetGain = 1.0f, crackle = 0.0f, packetSmooth = 1.0f, buzzPhase = 0.0f, burstEnv = 0.0f;
+    int burstTimer = 0;
+    bool burstOn = false;
     std::array<std::vector<float>, 2> glitchBuf;
 };
 } // namespace pp
