@@ -18,6 +18,8 @@ struct PedalSettings
     int heel = 0, toe = 127;     // calibrated ends of the expression pedal; toe may be lower than heel
     int curve = 0;               // 0 linear, 1 slow start, 2 fast start
     int pedalMapChannel = 0;     // 0 off, else the channel that speaks the original pedal's own CC map
+    int keeperChannel = 0, keeperCC = -1;  // a learned switch just for Keeper; off until learned
+    bool keeperLive = false;     // Keepers are tagged Live or Studio
 
     void load();
     void save() const;
@@ -31,10 +33,10 @@ struct PedalSettings
 class FootswitchLogic
 {
 public:
-    enum Event { Down, Tap, HoldStart, HoldEnd, ComboAB, ComboCD };
+    enum Event { Down, Tap, HoldStart, HoldEnd, ComboAB, ComboCD, ComboHoldAB, ComboHoldCD };
     std::function<void (int sw, Event)> onEvent;
 
-    static constexpr double kHoldSeconds = 0.45, kComboWindow = 0.12;
+    static constexpr double kHoldSeconds = 0.45, kComboWindow = 0.12, kComboHoldSeconds = 1.0;
 
     void press (int sw, double now);
     void release (int sw, double now);
@@ -44,4 +46,6 @@ public:
 private:
     std::array<bool, 4> down {}, held {}, combo {};
     std::array<double, 4> downAt {};
+    std::array<double, 2> comboAt {};      // A+B and C+D
+    std::array<bool, 2> comboHeld {};
 };

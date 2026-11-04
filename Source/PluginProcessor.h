@@ -2,6 +2,7 @@
 
 #include "Params.h"
 #include "PedalControl.h"
+#include "Keeper.h"
 #include "engine/Gesture.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <map>
@@ -67,11 +68,22 @@ public:
     void calibrateExpression();
     void resetFootswitches();
     void autoCalibrate();   // listens for three seconds, then picks the input headroom
+
+    // Keeper: log this moment, the last 8 seconds of audio included
+    void keepNow();
+    void addKeeperNote (int number, const juce::String& note) { keeper.addNote (number, note); }
+    juce::File exportKeepers();
+    void openKeepersFolder();
+    void learnKeeper();
+    bool keeperLive() const { return settings.keeperLive; }
+    void setKeeperLive (bool live);
+    int lastKeeper() const { return keeper.lastNumber(); }
+    std::atomic<int> uiKeepPulse { 0 };       // counts Keepers, Pebble nods
     bool isLearning() const { return learnTarget != LearnNone; }
     int learningWhat() const { return learnTarget; }
     bool isCalibrating() const { return calibrating; }
     bool captureLatched() const { return capLatched; }
-    enum { LearnNone = -1, LearnExpression = 4 };
+    enum { LearnNone = -1, LearnExpression = 4, LearnKeeper = 5 };
 
     // ---- what the panel and Pebble show ----
     float currentBpm() const { return uiBpm.load(); }
@@ -108,6 +120,7 @@ private:
     static bool decodeAudio (const juce::String&, std::vector<float>& l, std::vector<float>& r);
 
     pp::PrismEngine engine;
+    Keeper keeper;
     pp::Gesture gesture;
     juce::SpinLock gestureLock;
     float gestAcc = 0.0f;
@@ -128,7 +141,7 @@ private:
 
     // MIDI handed to the message thread
     struct Pending { int kind = 0; int a = 0; float v = 0; const char* id = nullptr; };
-    enum PendingKind { FootPress, FootRelease, Expression, SetNorm, SetPlain, LoadPreset, Tap, Learned, CaptureCC, GestureCC };
+    enum PendingKind { FootPress, FootRelease, Expression, SetNorm, SetPlain, LoadPreset, Tap, Learned, CaptureCC, GestureCC, KeepCC };
     juce::AbstractFifo fifo { 512 };
     std::array<Pending, 512> pending;
     void queue (int kind, int a, float v);

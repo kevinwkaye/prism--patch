@@ -40,6 +40,7 @@ inline constexpr auto spareKnob = "spareKnob";
 inline constexpr auto expTarget = "expTarget";
 inline constexpr auto rateSync = "rateSync";
 inline constexpr auto timeSync = "timeSync";
+inline constexpr auto keeper = "keeper";
 } // namespace ParamIDs
 
 namespace names
@@ -244,6 +245,9 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     // ---- tempo sync for Rate and Time, off by default as on the pedal until you tap ----
     toggle (ParamIDs::rateSync, "Rate Follows Tempo", false);
     toggle (ParamIDs::timeSync, "Time Follows Tempo", false);
+
+    // ---- Keeper, as a parameter so a remote controller can fire it ----
+    toggle (ParamIDs::keeper, "Keeper", false);
 
     // ---- expression ----
     choice (ParamIDs::expTarget, "Expression Target", names::expTargetNames(), 4);

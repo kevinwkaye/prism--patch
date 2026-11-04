@@ -23,6 +23,9 @@ void PedalSettings::load()
     toe = jlimit (0, 127, xml->getIntAttribute ("toe", toe));
     curve = jlimit (0, 2, xml->getIntAttribute ("curve", curve));
     pedalMapChannel = jlimit (0, 16, xml->getIntAttribute ("pedalMapChannel", pedalMapChannel));
+    keeperChannel = jlimit (0, 16, xml->getIntAttribute ("keeperChannel", keeperChannel));
+    keeperCC = jlimit (-1, 127, xml->getIntAttribute ("keeperCC", keeperCC));
+    keeperLive = xml->getBoolAttribute ("keeperLive", keeperLive);
 }
 
 void PedalSettings::save() const
@@ -39,6 +42,9 @@ void PedalSettings::save() const
     xml.setAttribute ("toe", toe);
     xml.setAttribute ("curve", curve);
     xml.setAttribute ("pedalMapChannel", pedalMapChannel);
+    xml.setAttribute ("keeperChannel", keeperChannel);
+    xml.setAttribute ("keeperCC", keeperCC);
+    xml.setAttribute ("keeperLive", keeperLive);
     file().getParentDirectory().createDirectory();
     xml.writeTo (file());
 }
@@ -75,6 +81,8 @@ void FootswitchLogic::press (int sw, double now)
     if (down[(size_t) partner] && ! held[(size_t) partner] && now - downAt[(size_t) partner] < kComboWindow)
     {
         combo[(size_t) sw] = combo[(size_t) partner] = true;
+        comboAt[(size_t) (sw / 2)] = now;
+        comboHeld[(size_t) (sw / 2)] = false;
         if (onEvent) onEvent (sw < 2 ? 0 : 2, sw < 2 ? ComboAB : ComboCD);
         return;
     }
@@ -92,6 +100,17 @@ void FootswitchLogic::release (int sw, double now)
 
 void FootswitchLogic::tick (double now)
 {
+    // both switches of a combo still down after a second: the combo hold
+    for (int pair = 0; pair < 2; ++pair)
+    {
+        const int a = pair * 2, b = a + 1;
+        if (down[(size_t) a] && down[(size_t) b] && combo[(size_t) a] && combo[(size_t) b]
+            && ! comboHeld[(size_t) pair] && now - comboAt[(size_t) pair] >= kComboHoldSeconds)
+        {
+            comboHeld[(size_t) pair] = true;
+            if (onEvent) onEvent (a, pair == 0 ? ComboHoldAB : ComboHoldCD);
+        }
+    }
     for (int i = 0; i < 4; ++i)
         if (down[(size_t) i] && ! held[(size_t) i] && ! combo[(size_t) i] && now - downAt[(size_t) i] >= kHoldSeconds)
         {

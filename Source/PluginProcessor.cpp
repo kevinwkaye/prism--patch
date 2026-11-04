@@ -57,6 +57,7 @@ PrismProcessor::~PrismProcessor()
 void PrismProcessor::prepareToPlay (double sampleRate, int)
 {
     engine.prepare (sampleRate);
+    keeper.prepare (sampleRate);
     for (int c = 0; c < 2; ++c)
     {
         for (auto* b : { &bassLp[c][0], &bassLp[c][1] }) { b->lowpass (120.0f, 0.7071f, (float) sampleRate); b->reset(); }
@@ -186,6 +187,7 @@ void PrismProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
     const auto p = readParams (n);
     float* L = buffer.getWritePointer (0);
     float* R = buffer.getWritePointer (1);
+    keeper.pushInput (L, R, n);
 
     // Bass input: everything under 120 Hz stays dry and tight, the effects work above it
     const bool bass = p.shared.inputMode == 2;
@@ -205,6 +207,7 @@ void PrismProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
 
     if (bass)
         for (int i = 0; i < n; ++i) { L[i] += lowL[(size_t) i]; R[i] += lowR[(size_t) i]; }
+    keeper.pushOutput (L, R, n);
 }
 
 // =====================================================================================
@@ -248,6 +251,11 @@ void PrismProcessor::handleMidi (const MidiMessage& m)
                 queue (val >= 64 ? FootPress : FootRelease, k, 0.0f);
                 return;
             }
+        if (settings.keeperCC >= 0 && ch == settings.keeperChannel && cc == settings.keeperCC)
+        {
+            if (val >= 64) queue (KeepCC, 0, 0.0f);
+            return;
+        }
         if (ch == settings.expChannel && cc == settings.expCC)
         {
             queue (Expression, val, 0.0f);
@@ -347,6 +355,7 @@ void PrismProcessor::timerCallback()
                 case SetPlain: setPlain (q.id, q.v); break;
                 case LoadPreset: if (q.a >= 0 && q.a < kPresets) loadPreset (q.a); break;
                 case Tap: tap(); break;
+                case KeepCC: keepNow(); break;
                 case GestureCC:
                     if (q.a == 2) clearGestures();
                     else if ((q.a == 1) != gesture.isRecording()) toggleGestureRecord();
@@ -385,6 +394,12 @@ void PrismProcessor::timerCallback()
                         settings.fsCC[(size_t) what] = cc;
                         say ("FOOTSWITCH " + String::charToString ((juce_wchar) ('A' + what)) + " IS CC " + String (cc));
                     }
+                    else if (what == LearnKeeper)
+                    {
+                        settings.keeperChannel = ch;
+                        settings.keeperCC = cc;
+                        say ("KEEPER IS CC " + String (cc));
+                    }
                     else if (what == LearnExpression)
                     {
                         settings.expChannel = ch;
@@ -400,6 +415,12 @@ void PrismProcessor::timerCallback()
     };
     apply (scope.startIndex1, scope.blockSize1);
     apply (scope.startIndex2, scope.blockSize2);
+
+    if (raw.at (ParamIDs::keeper)->load() > 0.5f)
+    {
+        setPlain (ParamIDs::keeper, 0.0f);
+        keepNow();
+    }
 
     footswitches.tick (now);
     int mask = 0;
@@ -465,6 +486,14 @@ void PrismProcessor::onFootEvent (int sw, FootswitchLogic::Event e)
         uiDeepToggle.fetch_add (1);
         return;
     }
+    if (e == E::ComboHoldCD)
+    {
+        // held a second: Keeper, on the plugin you were playing, so take the footswitches back
+        focused.store (this);
+        keepNow();
+        return;
+    }
+    if (e == E::ComboHoldAB) return; // reserved
     if (e == E::ComboCD)
     {
         // hand the footswitches to the next Prism Patch in the set
@@ -663,6 +692,92 @@ void PrismProcessor::autoCalibrate()
     autoCalUntil = Time::getMillisecondCounterHiRes() * 0.001 + 3.0;
     autoCalPeak = 0.0f;
     say ("PLAY AT YOUR NORMAL VOLUME");
+}
+
+// =====================================================================================
+// Keeper
+// =====================================================================================
+void PrismProcessor::keepNow()
+{
+    DynamicObject::Ptr e = new DynamicObject();
+    e->setProperty ("plugin", "Prism Patch");
+   #ifdef JucePlugin_VersionString
+    e->setProperty ("version", JucePlugin_VersionString);
+   #endif
+    e->setProperty ("recreates", "Hologram Electronics Chroma Console");
+    e->setProperty ("time", Time::getCurrentTime().toISO8601 (true));
+    e->setProperty ("context", settings.keeperLive ? "Live" : "Studio");
+    e->setProperty ("preset", selected < 0 ? String ("none") : String::charToString ((juce_wchar) ('A' + selected / kPerBank)) + " " + String (selected % kPerBank + 1).paddedLeft ('0', 2));
+    e->setProperty ("tempo", uiBpm.load());
+    e->setProperty ("tempoFromHost", uiSynced.load());
+
+    // the chain as you'd describe it: slot by slot, effect, on or off
+    Array<var> chain;
+    for (int m : currentOrder())
+    {
+        DynamicObject::Ptr slot = new DynamicObject();
+        slot->setProperty ("module", names::modules[m]);
+        slot->setProperty ("effect", names::effects[m][jlimit (0, 5, idx (ParamIDs::fx[m]))]);
+        slot->setProperty ("on", on (ParamIDs::on[m]));
+        chain.add (var (slot.get()));
+    }
+    e->setProperty ("chain", chain);
+
+    DynamicObject::Ptr exp = new DynamicObject();
+    const auto& targets = names::expTargets();
+    exp->setProperty ("target", targets[(size_t) jlimit (0, (int) targets.size() - 1, idx (ParamIDs::expTarget))].label);
+    exp->setProperty ("position", uiExp.load());
+    exp->setProperty ("movedSecondsAgo", Time::getMillisecondCounterHiRes() * 0.001 - expMovedAt);
+    e->setProperty ("expression", var (exp.get()));
+
+    // every parameter, hidden ones included, as value and as shown on the panel
+    DynamicObject::Ptr params = new DynamicObject();
+    for (auto* prm : getParameters())
+        if (auto* rp = dynamic_cast<RangedAudioParameter*> (prm))
+        {
+            if (rp->getParameterID() == ParamIDs::keeper) continue;
+            DynamicObject::Ptr pv = new DynamicObject();
+            pv->setProperty ("value", rp->convertFrom0to1 (rp->getValue()));
+            pv->setProperty ("shown", rp->getCurrentValueAsText());
+            params->setProperty (rp->getParameterID(), var (pv.get()));
+        }
+    e->setProperty ("parameters", var (params.get()));
+
+    Array<var> gestures;
+    for (int i = 0; i < pp::Gesture::kLanes; ++i)
+        if (uiLaneActive[(size_t) i].load()) gestures.add (kLaneParams[i]);
+    e->setProperty ("gestureLoops", gestures);
+    e->setProperty ("captureState", engine.getCapture().uiState.load());
+
+    keeper.keep (e);
+    uiKeepPulse.fetch_add (1);
+    say ("KEPT");
+}
+
+File PrismProcessor::exportKeepers()
+{
+    const auto f = keeper.exportZip();
+    if (f.existsAsFile()) { say ("EXPORTED TO DOCUMENTS"); f.revealToUser(); }
+    else say ("NOTHING KEPT YET");
+    return f;
+}
+
+void PrismProcessor::openKeepersFolder()
+{
+    Keeper::folder().createDirectory();
+    Keeper::folder().startAsProcess();
+}
+
+void PrismProcessor::learnKeeper()
+{
+    learnTarget.store (LearnKeeper);
+    say ("PRESS YOUR KEEPER SWITCH");
+}
+
+void PrismProcessor::setKeeperLive (bool live)
+{
+    settings.keeperLive = live;
+    settings.save();
 }
 
 void PrismProcessor::resetFootswitches()

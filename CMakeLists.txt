@@ -58,7 +58,8 @@ if(PRISM_BUILD_PLUGIN)
     target_sources(PrismPatch PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
-        Source/PedalControl.cpp)
+        Source/PedalControl.cpp
+        Source/Keeper.cpp)
 
     target_include_directories(PrismPatch PRIVATE Source Source/engine)
 
