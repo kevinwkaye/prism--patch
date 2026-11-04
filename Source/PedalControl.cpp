@@ -26,6 +26,7 @@ void PedalSettings::load()
     keeperChannel = jlimit (0, 16, xml->getIntAttribute ("keeperChannel", keeperChannel));
     keeperCC = jlimit (-1, 127, xml->getIntAttribute ("keeperCC", keeperCC));
     keeperLive = xml->getBoolAttribute ("keeperLive", keeperLive);
+    prismLayout = jlimit (0, 1, xml->getIntAttribute ("prismLayout", prismLayout));
 }
 
 void PedalSettings::save() const
@@ -45,6 +46,7 @@ void PedalSettings::save() const
     xml.setAttribute ("keeperChannel", keeperChannel);
     xml.setAttribute ("keeperCC", keeperCC);
     xml.setAttribute ("keeperLive", keeperLive);
+    xml.setAttribute ("prismLayout", prismLayout);
     file().getParentDirectory().createDirectory();
     xml.writeTo (file());
 }

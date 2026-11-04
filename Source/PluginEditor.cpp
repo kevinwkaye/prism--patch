@@ -570,11 +570,18 @@ void FootswitchCard::paint (Graphics& g)
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 12.0f);
     ff::label (g, "FOOTSWITCH", { 16, 14, 258, 18 });
 
-    static const char* const tapJob[4] = { "BYPASS", "TAP TEMPO", "GESTURE REC", "NEXT PRESET" };
-    static const char* const holdJob[4] = { "BYPASS ALL", "CAPTURE", "CLEAR GESTURES", "PREV PRESET" };
-    static const char* const comboJob[4] = { "A+B  DEEP PANEL", "", "C+D  NEXT PLUGIN, HOLD TO KEEP", "" };
+    const bool classic = proc.footLayout() == PrismProcessor::LayoutClassic;
+    static const char* const tapClassic[4] = { "BYPASS", "TAP TEMPO", "GESTURE REC", "NEXT PRESET" };
+    static const char* const holdClassic[4] = { "BYPASS ALL", "CAPTURE", "CLEAR GESTURES", "PREV PRESET" };
+    static const char* const comboClassic[4] = { "A+B  DEEP PANEL", "", "C+D  NEXT PLUGIN, HOLD TO KEEP", "" };
+    static const char* const holdModules[4] = { "BYPASS ALL", "CAPTURE", "GESTURE", "TAP TEMPO" };
+    static const char* const comboModules[4] = { "A+B  NEXT PRESET", "", "C+D  NEXT PLUGIN, HOLD TO KEEP", "" };
+    static const char* const noteModules[4] = { "", "HOLD AGAIN TO CLEAR A LOOP", "HOLD: RECORD, LOOP, ERASE", "HOLD, THEN TAP D IN TIME" };
+    const String tapJob = classic ? String (tapClassic[sw]) : "SLOT " + String (sw + 1) + " ON/OFF";
+    const String holdJob = classic ? holdClassic[sw] : holdModules[sw];
+    const String comboJob = classic ? comboClassic[sw] : comboModules[sw];
     struct Row { const char* k; String v; };
-    const Row rows[3] = { { "TAP", tapJob[sw] }, { "HOLD", holdJob[sw] }, { "LISTENS FOR", sends } };
+    const Row rows[3] = { { "TAP", tapJob }, { "HOLD", holdJob }, { "LISTENS FOR", sends } };
     int y = 150;
     for (const auto& r : rows)
     {
@@ -586,9 +593,23 @@ void FootswitchCard::paint (Graphics& g)
     }
     g.setColour (ff::ring);
     g.fillRect (16, y, 258, 2);
-    if (sw == 0) ff::label (g, "BYPASS GROUP", { 16, y + 6, 258, 18 }, Justification::centredLeft, ff::dim, 11.0f);
-    else if (sw == 1) ff::label (g, "TAP CLEARS A PLAYING CAPTURE", { 16, y + 6, 258, 18 }, Justification::centredLeft, ff::dim, 11.0f);
-    if (String (comboJob[sw]).isNotEmpty()) ff::label (g, comboJob[sw], { 16, y + (sw == 0 ? 56 : 6), 258, 18 }, Justification::centredLeft, ff::dim, 11.0f);
+    if (classic)
+    {
+        if (sw == 0) ff::label (g, "BYPASS GROUP", { 16, y + 6, 258, 18 }, Justification::centredLeft, ff::dim, 11.0f);
+        else if (sw == 1) ff::label (g, "TAP CLEARS A PLAYING CAPTURE", { 16, y + 6, 258, 18 }, Justification::centredLeft, ff::dim, 11.0f);
+        if (comboJob.isNotEmpty()) ff::label (g, comboJob, { 16, y + (sw == 0 ? 56 : 6), 258, 18 }, Justification::centredLeft, ff::dim, 11.0f);
+    }
+    else
+    {
+        // which module this footswitch reaches right now, in its colour
+        const int m = proc.currentOrder()[(size_t) sw];
+        static const char* const moduleNames[4] = { "CHARACTER", "MOVEMENT", "DIFFUSION", "TEXTURE" };
+        g.setColour (ff::module (m));
+        g.fillEllipse (16.0f, (float) y + 10.0f, 10.0f, 10.0f);
+        ff::label (g, String ("NOW ") + moduleNames[m], { 34, y + 6, 240, 18 }, Justification::centredLeft, ff::ink, 11.0f);
+        if (String (noteModules[sw]).isNotEmpty()) ff::label (g, noteModules[sw], { 16, y + 30, 258, 18 }, Justification::centredLeft, ff::dim, 11.0f);
+        if (comboJob.isNotEmpty()) ff::label (g, comboJob, { 16, y + 54, 258, 18 }, Justification::centredLeft, ff::dim, 11.0f);
+    }
 }
 
 void FootswitchCard::tick()
@@ -596,6 +617,10 @@ void FootswitchCard::tick()
     const auto& s = proc.pedals();
     const String t = "CH " + String (s.fsChannel[(size_t) sw]) + String::fromUTF8 (" · CC ") + String (s.fsCC[(size_t) sw]);
     if (t != sends) { sends = t; repaint(); }
+    const bool classic = proc.footLayout() == PrismProcessor::LayoutClassic;
+    const int state = (classic ? 1 : 0) + 2 * proc.currentOrder()[(size_t) sw];
+    if (state != lastState) { lastState = state; repaint(); }
+    for (auto& chip : group) chip->setVisible (classic); // the bypass group only matters when A is a bypass
     learn.setLit (proc.learningWhat() == sw);
     learn.setText (proc.learningWhat() == sw ? "PRESS IT NOW" : "LEARN");
     const bool down = (proc.uiFootDown.load() >> sw) & 1;
@@ -646,9 +671,36 @@ void MiniFoot::paint (Graphics& g)
     auto b = getLocalBounds().toFloat().reduced (1.0f);
     g.setColour (down ? ff::ink : ff::bg);
     g.fillRoundedRectangle (b, 8.0f);
-    g.setColour (down ? ff::ink : ff::line);
-    g.drawRoundedRectangle (b, 8.0f, 2.0f);
+    // Modules layout: lit in the colour of the module it switches, while that module is on
+    bool lit = false;
+    Colour col = ff::line;
+    if (proc.footLayout() == PrismProcessor::LayoutModules)
+    {
+        const int m = proc.currentOrder()[(size_t) sw];
+        lit = raw (proc, ParamIDs::on[m]) > 0.5f && raw (proc, ParamIDs::bypass) < 0.5f;
+        if (lit) col = ff::module (m);
+    }
+    g.setColour (down ? ff::ink : col);
+    g.drawRoundedRectangle (b.reduced (lit ? 1.0f : 0.0f), 8.0f, lit ? 3.0f : 2.0f);
     ff::label (g, String::charToString ((juce_wchar) ('A' + sw)), getLocalBounds(), Justification::centred, down ? ff::bg : ff::ink, 14.0f);
+}
+
+void FootLayoutLabel::paint (Graphics& g)
+{
+    const bool classic = proc.footLayout() == PrismProcessor::LayoutClassic;
+    ff::label (g, String::fromUTF8 ("FOOTSWITCHES · ") + (classic ? "CLASSIC" : "MODULES") + "  v", getLocalBounds(), Justification::centredLeft, ff::dim, 12.0f);
+}
+
+void FootLayoutLabel::mouseDown (const MouseEvent&)
+{
+    PopupMenu m;
+    const int now = proc.footLayout();
+    m.addItem (1, "Modules: tap A to D to switch slots 1 to 4", true, now == PrismProcessor::LayoutModules);
+    m.addItem (2, "Classic: laid out like the original pedal", true, now == PrismProcessor::LayoutClassic);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (this), [this] (int r)
+    {
+        if (r == 1 || r == 2) { proc.setFootLayout (r - 1); repaint(); if (auto* p = getParentComponent()) p->repaint(); }
+    });
 }
 
 void ExpressionMeter::paint (Graphics& g)
@@ -854,6 +906,8 @@ PrismEditor::PrismEditor (PrismProcessor& p)
         minis[(size_t) m] = std::make_unique<MiniFoot> (p, m);
         addAndMakeVisible (*minis[(size_t) m]);
     }
+    footLayout = std::make_unique<FootLayoutLabel> (p);
+    addAndMakeVisible (*footLayout);
     for (auto* c : std::initializer_list<Component*> { &inputMode, &tempoCard, &sync, &viewMain, &viewDeep, &viewPedal,
                                                        &pebble, &gestureButton, &captureButton, &bypassButton, &captureBar, &mix,
                                                        &presetCard, &bankA, &bankB, &bankC, &bankD, &expression,
@@ -1035,7 +1089,6 @@ void PrismEditor::paint (Graphics& g)
     }
     ff::label (g, captureText, { 360, 602, 260, 18 }, Justification::centredLeft, ff::dim, 12.0f);
     ff::label (g, "PRESET", { 782, 510, 110, 18 });
-    ff::label (g, "FOOTSWITCHES", { 910, 510, 180, 18 });
 }
 
 void PrismEditor::resized()
@@ -1064,6 +1117,7 @@ void PrismEditor::resized()
     bankC.setBounds (782 + 2 * (bw + bg), 598, bw, 24);
     bankD.setBounds (782 + 3 * (bw + bg), 598, bw, 24);
     for (int k = 0; k < 4; ++k) minis[(size_t) k]->setBounds (910 + k * 46, 532, 34, 34);
+    footLayout->setBounds (910, 506, 180, 22);
     expression.setBounds (910, 578, 172, 46);
     bypassButton.setBounds (1106, 532, 118, 64);
 }

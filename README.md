@@ -40,6 +40,19 @@ Everything works from the screen, so you don't need any pedals. If you have a MI
 
 These settings are shared by every Flip Fella plugin on your computer, so you set them up once.
 
+Each footswitch switches one module on and off, from left to right, and holding it does something extra. The on-screen squares light in each module's colour while it's on. If you reorder the modules, A still switches whichever is on the left.
+
+| Footswitch | Tap | Hold |
+| --- | --- | --- |
+| A | Slot 1 on or off | Bypass everything |
+| B | Slot 2 on or off | Capture: hold to record, let go to loop. Hold again to clear |
+| C | Slot 3 on or off | Gesture: record, then loop, then erase |
+| D | Slot 4 on or off | Tap tempo: hold D, then tap D in time. Stop tapping to finish |
+| A+B | Next preset | |
+| C+D | Hand the footswitches to the next Prism Patch | Hold a second: save a Keeper |
+
+Prefer the layout of the original pedal? Click **FOOTSWITCHES** in the bottom strip and choose **Classic**:
+
 | Footswitch | Tap | Hold |
 | --- | --- | --- |
 | A | Bypass (or the bypass group) | Bypass everything |
@@ -47,7 +60,7 @@ These settings are shared by every Flip Fella plugin on your computer, so you se
 | C | Gesture record on or off | Erase Gestures |
 | D | Next preset | Previous preset |
 | A+B | Show or hide the Deep page | |
-| C+D | Hand the footswitches to the next Prism Patch | |
+| C+D | Hand the footswitches to the next Prism Patch | Hold a second: save a Keeper |
 
 ### Getting footswitch MIDI to the plugin in Ableton
 

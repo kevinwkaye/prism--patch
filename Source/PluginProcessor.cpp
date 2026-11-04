@@ -423,6 +423,7 @@ void PrismProcessor::timerCallback()
     }
 
     footswitches.tick (now);
+    if (tapModeUntil > 0.0 && now > tapModeUntil) { tapModeUntil = 0.0; say ("TEMPO " + String (roundToInt (f (ParamIDs::bpm))) + " BPM"); }
     int mask = 0;
     for (int k = 0; k < 4; ++k) if (footswitches.isDown (k)) mask |= 1 << k;
     uiFootDown.store (mask);
@@ -478,6 +479,123 @@ void PrismProcessor::onFootEvent (int sw, FootswitchLogic::Event e)
 {
     using E = FootswitchLogic;
     if (e == E::Down || e == E::ComboAB || e == E::ComboCD) uiFootPulse.fetch_add (1);
+    if (e == E::Down && sw >= 0 && sw < 4) footDownAt[(size_t) sw] = Time::getMillisecondCounterHiRes() * 0.001;
+
+    // C+D is the same in both layouts: tap hands the footswitches on, hold a second keeps
+    if (e == E::ComboHoldCD)
+    {
+        // Keeper, on the plugin you were playing, so take the footswitches back
+        focused.store (this);
+        keepNow();
+        return;
+    }
+    if (e == E::ComboCD)
+    {
+        const SpinLock::ScopedLockType l (focusLock);
+        const int i = instances.indexOf (this);
+        auto* next = instances.isEmpty() ? nullptr : instances[(i + 1) % instances.size()];
+        focused.store (next);
+        if (next != nullptr) next->say ("PEDALS FOCUS HERE");
+        return;
+    }
+    if (settings.prismLayout == LayoutClassic) onFootClassic (sw, e);
+    else onFootModules (sw, e);
+}
+
+void PrismProcessor::onFootModules (int sw, FootswitchLogic::Event e)
+{
+    using E = FootswitchLogic;
+    const int capState = engine.getCapture().uiState.load();
+
+    if (e == E::ComboAB || e == E::ComboHoldAB)
+    {
+        // a Capture started by B's press is not wanted when B was half of a pair
+        if (captureStartedOnDown) { engine.postCommand (pp::PrismEngine::CmdCaptureClear); captureStartedOnDown = false; }
+        if (e == E::ComboAB) stepPreset (1);
+        return;
+    }
+
+    // tap tempo mode: once D has been held, presses on D count beats until you stop tapping
+    if (sw == 3 && tapModeOn())
+    {
+        if (e == E::Down) tap();
+        return;
+    }
+
+    switch (sw)
+    {
+        case 0:
+            if (e == E::Tap) toggleSlot (0);
+            if (e == E::HoldStart) { setPlain (ParamIDs::bypass, on (ParamIDs::bypass) ? 0.0f : 1.0f); say (on (ParamIDs::bypass) ? "ALL BYPASSED" : "ALL ON"); }
+            break;
+        case 1:
+            if (e == E::Down && captureIdle (capState))
+            {
+                // start listening straight away, so a hold catches the first note
+                engine.postCommand (pp::PrismEngine::CmdCaptureHold);
+                captureStartedOnDown = true;
+            }
+            if (e == E::Tap)
+            {
+                if (captureStartedOnDown) engine.postCommand (pp::PrismEngine::CmdCaptureClear);
+                captureStartedOnDown = false;
+                toggleSlot (1);
+            }
+            if (e == E::HoldStart && ! captureStartedOnDown)
+            {
+                engine.postCommand (pp::PrismEngine::CmdCaptureClear);
+                say ("CAPTURE CLEARED");
+            }
+            if (e == E::HoldEnd && captureStartedOnDown) { engine.postCommand (pp::PrismEngine::CmdCaptureRelease); captureStartedOnDown = false; }
+            break;
+        case 2:
+            if (e == E::Tap) toggleSlot (2);
+            if (e == E::HoldStart) gestureCycle();
+            break;
+        case 3:
+            if (e == E::Tap) toggleSlot (3);
+            if (e == E::HoldStart)
+            {
+                // the press that started the hold is the first beat
+                taps.clear();
+                taps.push_back (footDownAt[3]);
+                tapModeUntil = Time::getMillisecondCounterHiRes() * 0.001 + 2.5;
+                say ("TAP D FOR TEMPO");
+            }
+            break;
+        default: break;
+    }
+}
+
+void PrismProcessor::toggleSlot (int slot)
+{
+    const int m = currentOrder()[(size_t) jlimit (0, 3, slot)];
+    if (on (ParamIDs::bypass)) setPlain (ParamIDs::bypass, 0.0f); // switching a module wakes the chain
+    const bool nowOn = ! on (ParamIDs::on[m]);
+    setPlain (ParamIDs::on[m], nowOn ? 1.0f : 0.0f);
+    static const char* const moduleNames[4] = { "CHARACTER", "MOVEMENT", "DIFFUSION", "TEXTURE" };
+    say (String (moduleNames[m]) + (nowOn ? " ON" : " OFF"));
+}
+
+void PrismProcessor::gestureCycle()
+{
+    // record, then loop, then erase
+    if (uiGestRec.load()) toggleGestureRecord();
+    else if (uiGestLoops.load() > 0) clearGestures();
+    else toggleGestureRecord();
+}
+
+void PrismProcessor::setFootLayout (int layout)
+{
+    settings.prismLayout = jlimit (0, 1, layout);
+    settings.save();
+    tapModeUntil = 0.0;
+    say (settings.prismLayout == LayoutClassic ? "CLASSIC FOOTSWITCHES" : "A TO D SWITCH MODULES");
+}
+
+void PrismProcessor::onFootClassic (int sw, FootswitchLogic::Event e)
+{
+    using E = FootswitchLogic;
     const int capState = engine.getCapture().uiState.load();
 
     if (e == E::ComboAB)
@@ -486,24 +604,7 @@ void PrismProcessor::onFootEvent (int sw, FootswitchLogic::Event e)
         uiDeepToggle.fetch_add (1);
         return;
     }
-    if (e == E::ComboHoldCD)
-    {
-        // held a second: Keeper, on the plugin you were playing, so take the footswitches back
-        focused.store (this);
-        keepNow();
-        return;
-    }
     if (e == E::ComboHoldAB) return; // reserved
-    if (e == E::ComboCD)
-    {
-        // hand the footswitches to the next Prism Patch in the set
-        const SpinLock::ScopedLockType l (focusLock);
-        const int i = instances.indexOf (this);
-        auto* next = instances.isEmpty() ? nullptr : instances[(i + 1) % instances.size()];
-        focused.store (next);
-        if (next != nullptr) next->say ("PEDALS FOCUS HERE");
-        return;
-    }
 
     switch (sw)
     {
@@ -609,6 +710,7 @@ void PrismProcessor::tap()
     const double t = Time::getMillisecondCounterHiRes() * 0.001;
     if (! taps.empty() && t - taps.back() > 2.0) taps.clear();
     taps.push_back (t);
+    if (tapModeOn()) tapModeUntil = t + 2.5;
     if (taps.size() > 5) taps.erase (taps.begin());
     if (taps.size() >= 2)
     {

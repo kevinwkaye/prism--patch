@@ -20,6 +20,7 @@ struct PedalSettings
     int pedalMapChannel = 0;     // 0 off, else the channel that speaks the original pedal's own CC map
     int keeperChannel = 0, keeperCC = -1;  // a learned switch just for Keeper; off until learned
     bool keeperLive = false;     // Keepers are tagged Live or Studio
+    int prismLayout = 0;         // Prism Patch footswitches: 0 Modules (A to D switch slots 1 to 4), 1 Classic
 
     void load();
     void save() const;

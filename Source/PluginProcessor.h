@@ -77,6 +77,12 @@ public:
     void learnKeeper();
     bool keeperLive() const { return settings.keeperLive; }
     void setKeeperLive (bool live);
+
+    // footswitch layout: Modules (tap A to D switches slots 1 to 4) or Classic (as on the pedal)
+    enum { LayoutModules = 0, LayoutClassic = 1 };
+    int footLayout() const { return settings.prismLayout; }
+    void setFootLayout (int layout);
+    bool tapModeOn() const { return tapModeUntil > 0.0; }
     int lastKeeper() const { return keeper.lastNumber(); }
     std::atomic<int> uiKeepPulse { 0 };       // counts Keepers, Pebble nods
     bool isLearning() const { return learnTarget != LearnNone; }
@@ -110,6 +116,10 @@ private:
     void setPlain (const juce::String& id, float plain);
     void say (const juce::String& s);
     void dualBypass();
+    void onFootModules (int sw, FootswitchLogic::Event);
+    void onFootClassic (int sw, FootswitchLogic::Event);
+    void toggleSlot (int slot);
+    void gestureCycle();
 
     juce::ValueTree snapshotOf();
     void applySnapshot (const juce::ValueTree&);
@@ -166,6 +176,8 @@ private:
     double autoCalUntil = 0.0;
     float autoCalPeak = 0.0f;
     double capDownAt = -1.0;
+    double tapModeUntil = 0.0;              // after holding D, taps on D set the tempo
+    std::array<double, 4> footDownAt {};
     bool capHeldFired = false, capStartedOnDown = false, capLatched = false;
 
     // bass input keeps its lows dry: Linkwitz-Riley split at 120 Hz

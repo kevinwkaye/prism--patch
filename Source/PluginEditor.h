@@ -238,6 +238,7 @@ private:
     ActionChip learn, reset;
     std::vector<std::unique_ptr<ToggleChip>> group;
     juce::String sends;
+    int lastState = -1;
 };
 
 // Gesture, Capture and Bypass: the big round buttons in the strip.
@@ -268,6 +269,18 @@ public:
 private:
     PrismProcessor& proc;
     int sw;
+};
+
+// "FOOTSWITCHES · MODULES": click to choose what the four footswitches do.
+class FootLayoutLabel : public juce::Component
+{
+public:
+    explicit FootLayoutLabel (PrismProcessor& p) : proc (p) { setMouseCursor (juce::MouseCursor::PointingHandCursor); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    PrismProcessor& proc;
 };
 
 // The expression pedal's live position. Click for its target, Learn and Calibrate.
@@ -350,6 +363,7 @@ private:
     ui::FlipCard presetCard;
     ui::ActionChip bankA, bankB, bankC, bankD;
     std::array<std::unique_ptr<ui::MiniFoot>, 4> minis;
+    std::unique_ptr<ui::FootLayoutLabel> footLayout;
     ui::ExpressionMeter expression;
 
     // Keeper
