@@ -27,6 +27,7 @@ void PedalSettings::load()
     keeperCC = jlimit (-1, 127, xml->getIntAttribute ("keeperCC", keeperCC));
     keeperLive = xml->getBoolAttribute ("keeperLive", keeperLive);
     prismLayout = jlimit (0, 1, xml->getIntAttribute ("prismLayout", prismLayout));
+    footDevice = xml->getStringAttribute ("footDevice", footDevice);
 }
 
 void PedalSettings::save() const
@@ -47,6 +48,7 @@ void PedalSettings::save() const
     xml.setAttribute ("keeperCC", keeperCC);
     xml.setAttribute ("keeperLive", keeperLive);
     xml.setAttribute ("prismLayout", prismLayout);
+    xml.setAttribute ("footDevice", footDevice);
     file().getParentDirectory().createDirectory();
     xml.writeTo (file());
 }
@@ -119,4 +121,115 @@ void FootswitchLogic::tick (double now)
             held[(size_t) i] = true;
             if (onEvent) onEvent (i, HoldStart);
         }
+}
+
+// =====================================================================================
+// Direct MIDI input
+// =====================================================================================
+DirectMidiInput::DirectMidiInput()
+{
+    refresh();
+    startTimer (2000); // picks up a footswitch plugged in later, or freed by another app
+}
+
+DirectMidiInput::~DirectMidiInput()
+{
+    stopTimer();
+    const ScopedLock l (lock);
+    for (auto& in : inputs) in->stop();
+    inputs.clear();
+}
+
+bool DirectMidiInput::looksLikeFootswitch (const String& name)
+{
+    const auto n = name.toLowerCase();
+    for (auto* skip : { "keyboard", "keys", "piano", "mixer", "pad", "smk", "launch", "maschine", "push", "loopmidi", "loopbe" })
+        if (n.contains (skip)) return false;
+    for (auto* want : { "footctrl", "foot ctrl", "footswitch", "foot switch", "foot controller", "chocolate", "m-vave", "mvave", "cuvave", "pedal" })
+        if (n.contains (want)) return true;
+    return false;
+}
+
+StringArray DirectMidiInput::deviceNames()
+{
+    StringArray names;
+    for (const auto& d : MidiInput::getAvailableDevices()) names.add (d.name);
+    return names;
+}
+
+void DirectMidiInput::setWanted (const String& device)
+{
+    {
+        const ScopedLock l (lock);
+        if (device == wanted) return;
+        wanted = device;
+    }
+    refresh();
+}
+
+void DirectMidiInput::refresh()
+{
+    const auto available = MidiInput::getAvailableDevices();
+    const ScopedLock l (lock);
+    auto want = [this] (const String& name)
+    {
+        if (wanted == "none") return false;
+        return wanted.isEmpty() ? looksLikeFootswitch (name) : name == wanted;
+    };
+
+    // close what's gone or no longer wanted
+    for (int i = (int) inputs.size(); --i >= 0;)
+    {
+        bool present = false;
+        for (const auto& d : available) present = present || d.identifier == inputs[(size_t) i]->getIdentifier();
+        if (! present || ! want (inputs[(size_t) i]->getName()))
+        {
+            inputs[(size_t) i]->stop();
+            inputs.erase (inputs.begin() + i);
+        }
+    }
+
+    busy.clear();
+    for (const auto& d : available)
+    {
+        if (! want (d.name)) continue;
+        bool open = false;
+        for (auto& in : inputs) open = open || in->getIdentifier() == d.identifier;
+        if (open) continue;
+        if (auto in = MidiInput::openDevice (d.identifier, this))
+        {
+            in->start();
+            inputs.push_back (std::move (in));
+        }
+        else busy.add (d.name); // Windows lets one program hold a MIDI input at a time
+    }
+    isConnected.store (! inputs.empty());
+}
+
+String DirectMidiInput::status() const
+{
+    const ScopedLock l (lock);
+    if (wanted == "none") return "Off: footswitch MIDI comes from Ableton";
+    if (! inputs.empty())
+    {
+        StringArray names;
+        for (auto& in : inputs) names.add (in->getName());
+        return "Connected: " + names.joinIntoString (", ");
+    }
+    if (! busy.isEmpty()) return busy[0] + " is in use by Ableton. Turn its Track and Remote off in Ableton's MIDI settings";
+    return wanted.isEmpty() ? "No footswitch found: plug it in, or pick it below"
+                            : wanted + " isn't plugged in";
+}
+
+StringArray DirectMidiInput::openDevices() const
+{
+    const ScopedLock l (lock);
+    StringArray names;
+    for (auto& in : inputs) names.add (in->getName());
+    return names;
+}
+
+void DirectMidiInput::handleIncomingMidiMessage (MidiInput*, const MidiMessage& m)
+{
+    if (auto s = sink.load()) s (m);
 }

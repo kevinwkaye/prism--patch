@@ -688,7 +688,10 @@ void MiniFoot::paint (Graphics& g)
 void FootLayoutLabel::paint (Graphics& g)
 {
     const bool classic = proc.footLayout() == PrismProcessor::LayoutClassic;
-    ff::label (g, String::fromUTF8 ("FOOTSWITCHES · ") + (classic ? "CLASSIC" : "MODULES") + "  v", getLocalBounds(), Justification::centredLeft, ff::dim, 12.0f);
+    // a dot that lights when the footswitch is plugged in and heard directly
+    g.setColour (proc.pedalsDirect() ? ff::modG : ff::ring);
+    g.fillEllipse (0.0f, (float) getHeight() * 0.5f - 4.0f, 8.0f, 8.0f);
+    ff::label (g, String::fromUTF8 ("FOOTSWITCHES · ") + (classic ? "CLASSIC" : "MODULES") + "  v", getLocalBounds().withTrimmedLeft (14), Justification::centredLeft, ff::dim, 12.0f);
 }
 
 void FootLayoutLabel::mouseDown (const MouseEvent&)
@@ -697,9 +700,26 @@ void FootLayoutLabel::mouseDown (const MouseEvent&)
     const int now = proc.footLayout();
     m.addItem (1, "Modules: tap A to D to switch slots 1 to 4", true, now == PrismProcessor::LayoutModules);
     m.addItem (2, "Classic: laid out like the original pedal", true, now == PrismProcessor::LayoutClassic);
-    m.showMenuAsync (PopupMenu::Options().withTargetComponent (this), [this] (int r)
+
+    // where footswitch MIDI comes from
+    m.addSeparator();
+    m.addSectionHeader ("Footswitch input");
+    m.addItem (-1, proc.footInputStatus(), false, false);
+    const auto chosen = proc.footDevice();
+    m.addItem (10, "Find my footswitch automatically", true, chosen.isEmpty());
+    const auto devices = DirectMidiInput::deviceNames();
+    for (int i = 0; i < devices.size() && i < 40; ++i)
+        m.addItem (100 + i, "Use " + devices[i], true, chosen == devices[i]);
+    m.addItem (11, "Only from a MIDI track in Ableton", true, chosen == "none");
+
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (this), [this, devices] (int r)
     {
-        if (r == 1 || r == 2) { proc.setFootLayout (r - 1); repaint(); if (auto* p = getParentComponent()) p->repaint(); }
+        if (r == 1 || r == 2) proc.setFootLayout (r - 1);
+        else if (r == 10) proc.setFootDevice ({});
+        else if (r == 11) proc.setFootDevice ("none");
+        else if (r >= 100 && r - 100 < devices.size()) proc.setFootDevice (devices[r - 100]);
+        repaint();
+        if (auto* p = getParentComponent()) p->repaint();
     });
 }
 
@@ -1117,7 +1137,7 @@ void PrismEditor::resized()
     bankC.setBounds (782 + 2 * (bw + bg), 598, bw, 24);
     bankD.setBounds (782 + 3 * (bw + bg), 598, bw, 24);
     for (int k = 0; k < 4; ++k) minis[(size_t) k]->setBounds (910 + k * 46, 532, 34, 34);
-    footLayout->setBounds (910, 506, 180, 22);
+    footLayout->setBounds (910, 506, 196, 22);
     expression.setBounds (910, 578, 172, 46);
     bypassButton.setBounds (1106, 532, 118, 64);
 }
@@ -1231,4 +1251,5 @@ void PrismEditor::timerCallback()
     captureBar.repaint();
     expression.repaint();
     for (auto& mf : minis) mf->repaint();
+    footLayout->repaint();
 }

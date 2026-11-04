@@ -83,6 +83,14 @@ public:
     int footLayout() const { return settings.prismLayout; }
     void setFootLayout (int layout);
     bool tapModeOn() const { return tapModeUntil > 0.0; }
+
+    // footswitch MIDI read straight from the device, so every copy works without a MIDI track
+    void handleDirectMidi (const juce::MidiMessage&);   // MIDI thread
+    bool pedalsDirect() const { return direct->connected(); }
+    juce::String footInputStatus() const { return direct->status(); }
+    juce::String footDevice() const { return settings.footDevice; }
+    void setFootDevice (const juce::String& device);
+    std::atomic<bool> hostFeedsPedals { false };        // Ableton routes footswitch MIDI to this copy
     int lastKeeper() const { return keeper.lastNumber(); }
     std::atomic<int> uiKeepPulse { 0 };       // counts Keepers, Pebble nods
     bool isLearning() const { return learnTarget != LearnNone; }
@@ -110,7 +118,7 @@ public:
 private:
     void timerCallback() override;
     pp::EngineParams readParams (int numSamples);
-    void handleMidi (const juce::MidiMessage&);
+    void handleMidi (const juce::MidiMessage&, bool fromDevice);
     void onFootEvent (int sw, FootswitchLogic::Event);
     void setNorm (const juce::String& id, float v01);
     void setPlain (const juce::String& id, float plain);
@@ -154,6 +162,13 @@ private:
     enum PendingKind { FootPress, FootRelease, Expression, SetNorm, SetPlain, LoadPreset, Tap, Learned, CaptureCC, GestureCC, KeepCC };
     juce::AbstractFifo fifo { 512 };
     std::array<Pending, 512> pending;
+    juce::AbstractFifo directFifo { 512 };    // the same, written from the MIDI thread
+    std::array<Pending, 512> directPending;
+    juce::SpinLock directWriteLock;
+    juce::SharedResourcePointer<DirectMidiInput> direct;
+    juce::Time settingsStamp;
+    bool wasDirect = false;
+    double nextSettingsCheck = 0.0;
     void queue (int kind, int a, float v);
     void queueParam (int kind, const char* id, float v);
 

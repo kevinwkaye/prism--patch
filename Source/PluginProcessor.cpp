@@ -16,6 +16,20 @@ bool hasFocus (PrismProcessor* p)
     auto* f = focused.load();
     return f == nullptr || f == p;
 }
+
+// set while a message from the footswitch device is being handled on the MIDI thread
+thread_local bool fromDeviceNow = false;
+
+// footswitch device messages go to the copy that is learning, else the copy in charge
+void sendToFocused (const MidiMessage& m)
+{
+    const SpinLock::ScopedLockType l (focusLock);
+    PrismProcessor* target = nullptr;
+    for (auto* p : instances) if (p->isLearning()) target = p;
+    if (target == nullptr) target = focused.load();
+    if (target == nullptr && ! instances.isEmpty()) target = instances.getLast();
+    if (target != nullptr) target->handleDirectMidi (m);
+}
 } // namespace
 
 static const char* const kLaneParams[pp::Gesture::kLanes] = { "tilt", "rate", "time", "mix", "charAmount", "moveAmount", "diffAmount", "texAmount" };
@@ -37,6 +51,9 @@ PrismProcessor::PrismProcessor()
         if (auto* rp = dynamic_cast<RangedAudioParameter*> (p))
             raw[rp->getParameterID()] = apvts.getRawParameterValue (rp->getParameterID());
     settings.load();
+    settingsStamp = PedalSettings::file().getLastModificationTime();
+    direct->setSink (&sendToFocused);
+    direct->setWanted (settings.footDevice);
     footswitches.onEvent = [this] (int sw, FootswitchLogic::Event e) { onFootEvent (sw, e); };
     {
         const SpinLock::ScopedLockType l (focusLock);
@@ -182,7 +199,7 @@ void PrismProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
         captureLoadReady.store (false);
     }
 
-    for (const auto meta : midi) handleMidi (meta.getMessage());
+    for (const auto meta : midi) handleMidi (meta.getMessage(), false);
 
     const auto p = readParams (n);
     float* L = buffer.getWritePointer (0);
@@ -215,22 +232,51 @@ void PrismProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
 // =====================================================================================
 void PrismProcessor::queue (int kind, int a, float v)
 {
+    if (fromDeviceNow)
+    {
+        const auto scope = directFifo.write (1);
+        if (scope.blockSize1 > 0) directPending[(size_t) scope.startIndex1] = { kind, a, v, nullptr };
+        return;
+    }
     const auto scope = fifo.write (1);
     if (scope.blockSize1 > 0) pending[(size_t) scope.startIndex1] = { kind, a, v, nullptr };
 }
 
 void PrismProcessor::queueParam (int kind, const char* id, float v)
 {
+    if (fromDeviceNow)
+    {
+        const auto scope = directFifo.write (1);
+        if (scope.blockSize1 > 0) directPending[(size_t) scope.startIndex1] = { kind, 0, v, id };
+        return;
+    }
     const auto scope = fifo.write (1);
     if (scope.blockSize1 > 0) pending[(size_t) scope.startIndex1] = { kind, 0, v, id };
 }
 
-void PrismProcessor::handleMidi (const MidiMessage& m)
+void PrismProcessor::handleDirectMidi (const MidiMessage& m)
+{
+    // several MIDI devices can call in on their own threads
+    const SpinLock::ScopedLockType l (directWriteLock);
+    fromDeviceNow = true;
+    handleMidi (m, true);
+    fromDeviceNow = false;
+}
+
+void PrismProcessor::setFootDevice (const String& device)
+{
+    settings.footDevice = device;
+    settings.save();
+    settingsStamp = PedalSettings::file().getLastModificationTime();
+    direct->setWanted (device);
+}
+
+void PrismProcessor::handleMidi (const MidiMessage& m, bool fromDevice)
 {
     const int ch = m.getChannel();
     if (m.isProgramChange())
     {
-        if ((ch == settings.pedalMapChannel || ch == settings.fsChannel[0]) && hasFocus (this))
+        if ((ch == settings.pedalMapChannel || ch == settings.fsChannel[0]) && (fromDevice || hasFocus (this)))
             queue (LoadPreset, m.getProgramChangeNumber(), 0.0f);
         return;
     }
@@ -243,22 +289,32 @@ void PrismProcessor::handleMidi (const MidiMessage& m)
         return;
     }
 
-    if (hasFocus (this))
+    // Straight from the footswitch device, any channel will do: it's the footswitch's own cable,
+    // and some footswitches ignore their channel setting. Through Ableton, the channel must match.
+    // When the device is read directly, the same messages arriving through Ableton are ignored,
+    // so nothing happens twice.
+    if (fromDevice || ! pedalsDirect())
     {
-        for (int k = 0; k < 4; ++k)
-            if (ch == settings.fsChannel[(size_t) k] && cc == settings.fsCC[(size_t) k])
+        int foot = -1;
+        for (int k = 0; k < 4 && foot < 0; ++k)
+            if ((fromDevice || ch == settings.fsChannel[(size_t) k]) && cc == settings.fsCC[(size_t) k]) foot = k;
+        const bool keep = foot < 0 && settings.keeperCC >= 0 && (fromDevice || ch == settings.keeperChannel) && cc == settings.keeperCC;
+        const bool expression = foot < 0 && ! keep && (fromDevice || ch == settings.expChannel) && cc == settings.expCC;
+        if (foot >= 0 || keep || expression)
+        {
+            if (! fromDevice)
             {
-                queue (val >= 64 ? FootPress : FootRelease, k, 0.0f);
-                return;
+                // The copy Ableton sends footswitch MIDI to takes charge, unless the copy in
+                // charge is fed too. A newly loaded copy with no MIDI track can't hold the pedals.
+                hostFeedsPedals.store (true);
+                const SpinLock::ScopedLockType l (focusLock);
+                auto* f = focused.load();
+                if (f != this && (f == nullptr || ! f->hostFeedsPedals.load())) focused.store (this);
+                if (focused.load() != this) return;
             }
-        if (settings.keeperCC >= 0 && ch == settings.keeperChannel && cc == settings.keeperCC)
-        {
-            if (val >= 64) queue (KeepCC, 0, 0.0f);
-            return;
-        }
-        if (ch == settings.expChannel && cc == settings.expCC)
-        {
-            queue (Expression, val, 0.0f);
+            if (foot >= 0) queue (val >= 64 ? FootPress : FootRelease, foot, 0.0f);
+            else if (keep) { if (val >= 64) queue (KeepCC, 0, 0.0f); }
+            else queue (Expression, val, 0.0f);
             return;
         }
     }
@@ -341,12 +397,30 @@ void PrismProcessor::say (const String& s)
 void PrismProcessor::timerCallback()
 {
     const double now = Time::getMillisecondCounterHiRes() * 0.001;
-    const auto scope = fifo.read (fifo.getNumReady());
-    auto apply = [&] (int start, int size)
+    // settings changed by another copy, or another Flip Fella plugin: pick them up
+    if (now >= nextSettingsCheck)
+    {
+        nextSettingsCheck = now + 1.0;
+        const auto stamp = PedalSettings::file().getLastModificationTime();
+        if (stamp != settingsStamp && learnTarget.load() == LearnNone && ! calibrating)
+        {
+            settingsStamp = stamp;
+            settings.load();
+            direct->setWanted (settings.footDevice);
+        }
+        const bool d = pedalsDirect();
+        if (d != wasDirect)
+        {
+            wasDirect = d;
+            if (d && hasFocus (this)) say ("FOOTSWITCHES READY");
+        }
+    }
+
+    auto apply = [&] (const std::array<Pending, 512>& from, int start, int size)
     {
         for (int i = start; i < start + size; ++i)
         {
-            const auto& q = pending[(size_t) i];
+            const auto& q = from[(size_t) i];
             switch (q.kind)
             {
                 case FootPress: footswitches.press (q.a, now); break;
@@ -413,8 +487,16 @@ void PrismProcessor::timerCallback()
             }
         }
     };
-    apply (scope.startIndex1, scope.blockSize1);
-    apply (scope.startIndex2, scope.blockSize2);
+    {
+        const auto scope = fifo.read (fifo.getNumReady());
+        apply (pending, scope.startIndex1, scope.blockSize1);
+        apply (pending, scope.startIndex2, scope.blockSize2);
+    }
+    {
+        const auto scope = directFifo.read (directFifo.getNumReady());
+        apply (directPending, scope.startIndex1, scope.blockSize1);
+        apply (directPending, scope.startIndex2, scope.blockSize2);
+    }
 
     if (raw.at (ParamIDs::keeper)->load() > 0.5f)
     {
@@ -1144,6 +1226,7 @@ void PrismProcessor::setStateInformation (const void* data, int sizeInBytes)
 
 AudioProcessorEditor* PrismProcessor::createEditor()
 {
+    focused.store (this); // opening a copy's window gives it the footswitches
     return new PrismEditor (*this);
 }
 

@@ -64,13 +64,20 @@ Prefer the layout of the original pedal? Click **FOOTSWITCHES** in the bottom st
 
 ### Getting footswitch MIDI to the plugin in Ableton
 
-1. In Preferences, Link Tempo MIDI, turn on **Track** for your footswitch's MIDI input.
-2. Make a MIDI track. Set **MIDI From** to your footswitch and **MIDI To** to the track holding Prism Patch, choosing Prism Patch in the second box.
-3. Arm the MIDI track, or set its monitor to In.
+Prism Patch reads your footswitch straight from its USB cable, so every copy you load works with no MIDI track. The dot next to **FOOTSWITCHES** in the bottom strip turns green when it's connected, and Pebble says FOOTSWITCHES READY.
+
+1. In Ableton's Preferences, Link Tempo MIDI, turn **Track**, **Sync** and **Remote** off for your footswitch's input. Windows lets only one program use a MIDI input at a time, so Ableton has to let go of it.
+2. Load Prism Patch. That's it.
+
+If the dot stays grey, click **FOOTSWITCHES**. The menu says what's wrong, and you can pick your footswitch from the list if it wasn't found automatically.
+
+With several copies loaded, the footswitches drive the one you opened or clicked last. Tap C+D to hand them to the next copy.
+
+Prefer routing through Ableton? Choose **Only from a MIDI track in Ableton** in that menu, then turn **Track** back on for the footswitch, make a MIDI track with **MIDI From** set to the footswitch and **MIDI To** set to Prism Patch, and arm it. The copy that track feeds takes the footswitches automatically.
 
 ### Kevin's setup (M-Vave Chocolate Plus and M-Audio EX-P)
 
-In CubeSuite: channel 16, footswitches A to D as momentary CC 20 to 23, the pedal jack set to expression input on CC 11. Put the Chocolate Plus switch on **U** and connect with the USB cable, not Bluetooth. The EX-P needs a 3.5 mm to 6.35 mm TRS adapter and reads backwards on the Chocolate Plus, which Calibrate fixes.
+In CubeSuite: footswitches A to D as momentary CC 20 to 23, the pedal jack set to expression input on CC 11. It always sends on channel 1 whatever CubeSuite says; read directly from its cable, Prism Patch accepts any channel. Put the Chocolate Plus switch on **U** and connect with the USB cable, not Bluetooth. The EX-P needs a 3.5 mm to 6.35 mm TRS adapter and reads backwards on the Chocolate Plus, which Calibrate fixes.
 
 ## Original pedal MIDI map
 
