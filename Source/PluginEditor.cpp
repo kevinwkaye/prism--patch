@@ -137,10 +137,10 @@ Rectangle<float> Pills::cell (int i) const
     const int n = labels.size();
     if (stacked)
     {
-        const float gap = 6.0f, h = ((float) getHeight() - gap * (float) (n - 1)) / (float) n;
+        const float gap = 10.0f, h = ((float) getHeight() - gap * (float) (n - 1)) / (float) n;
         return { 0.0f, (float) i * (h + gap), (float) getWidth(), h };
     }
-    const float gap = 6.0f, w = ((float) getWidth() - gap * (float) (n - 1)) / (float) n;
+    const float gap = 10.0f, w = ((float) getWidth() - gap * (float) (n - 1)) / (float) n;
     return { (float) i * (w + gap), 0.0f, w, (float) getHeight() };
 }
 
@@ -339,7 +339,7 @@ EffectGrid::EffectGrid (AudioProcessorValueTreeState& s, int m) : module (m)
 
 Rectangle<float> EffectGrid::cell (int i) const
 {
-    const float gap = 6.0f, w = ((float) getWidth() - 2.0f * gap) / 3.0f, h = ((float) getHeight() - gap) / 2.0f;
+    const float gap = 10.0f, w = ((float) getWidth() - 2.0f * gap) / 3.0f, h = ((float) getHeight() - gap) / 2.0f;
     return { (float) (i % 3) * (w + gap), (float) (i / 3) * (h + gap), w, h };
 }
 
@@ -452,15 +452,15 @@ void ModuleSection::setView (View v)
 
 void ModuleSection::resized()
 {
-    left.setBounds (212, 14, 28, 24);
+    left.setBounds (208, 14, 28, 24);
     right.setBounds (246, 14, 28, 24);
     card.setBounds (16, 58, 258, 64);
-    grid.setBounds (16, 134, 258, 58);
+    grid.setBounds (16, 134, 258, 62);
     if (knobDial) knobDial->setBounds (20, 210, 110, 128);
     if (mainPills)
     {
         amountDial->setBounds (20, 210, 110, 128);
-        mainPills->setBounds (150, 236, 124, 90);
+        mainPills->setBounds (150, 236, 124, 98);
     }
     else amountDial->setBounds (160, 210, 110, 128);
 
@@ -471,10 +471,10 @@ void ModuleSection::resized()
     if (deepAction) deepAction->setBounds (16, 252, 258, 30);
     if (module == pp::ModDiffusion)
     {
-        deepToggle1->setBounds (16, 252, 125, 30);
-        deepToggle2->setBounds (149, 252, 125, 30);
-        deepToggle3->setBounds (16, 288, 258, 28);
-        syncToggle->setBounds (16, 324, 258, 28);
+        deepToggle1->setBounds (16, 252, 124, 30);
+        deepToggle2->setBounds (150, 252, 124, 30);
+        deepToggle3->setBounds (16, 292, 258, 28);
+        syncToggle->setBounds (16, 330, 258, 28);
     }
     if (module == pp::ModMovement) syncToggle->setBounds (16, 316, 258, 28);
     if (deepMenu)
@@ -484,7 +484,7 @@ void ModuleSection::resized()
         deepSlider2->setBounds (150, 252, 124, 34);
         deepToggle1->setBounds (16, 298, 258, 30);
     }
-    hinge.setBounds (16, view == View::Main ? 352 : 362, 258, view == View::Main ? 32 : 24);
+    hinge.setBounds (16, view == View::Main ? 352 : 368, 258, view == View::Main ? 32 : 22);
 }
 
 void ModuleSection::paint (Graphics& g)
@@ -559,7 +559,7 @@ FootswitchCard::FootswitchCard (PrismProcessor& p, int s)
 void FootswitchCard::resized()
 {
     letter.setBounds (16, 42, 258, 96);
-    for (size_t m = 0; m < group.size(); ++m) group[m]->setBounds (16 + (int) m * 66, 290, 60, 24);
+    for (size_t m = 0; m < group.size(); ++m) group[m]->setBounds (16 + (int) m * 67, 290, 57, 24);
     learn.setBounds (16, 350, 124, 34);
     reset.setBounds (150, 350, 124, 34);
 }
@@ -572,7 +572,7 @@ void FootswitchCard::paint (Graphics& g)
 
     static const char* const tapJob[4] = { "BYPASS", "TAP TEMPO", "GESTURE REC", "NEXT PRESET" };
     static const char* const holdJob[4] = { "BYPASS ALL", "CAPTURE", "CLEAR GESTURES", "PREV PRESET" };
-    static const char* const comboJob[4] = { "A+B  DEEP PANEL", "", "C+D  NEXT PLUGIN", "" };
+    static const char* const comboJob[4] = { "A+B  DEEP PANEL", "", "C+D  NEXT PLUGIN, HOLD TO KEEP", "" };
     struct Row { const char* k; String v; };
     const Row rows[3] = { { "TAP", tapJob[sw] }, { "HOLD", holdJob[sw] }, { "LISTENS FOR", sends } };
     int y = 150;
@@ -619,8 +619,11 @@ void BigButton::paint (Graphics& g)
     g.fillRoundedRectangle (b, b.getHeight() * 0.5f);
     g.setColour (borderColour);
     g.drawRoundedRectangle (b, b.getHeight() * 0.5f, 2.0f);
-    ff::label (g, mainText, b.toNearestInt().withTrimmedBottom ((int) (b.getHeight() * 0.35f)).translated (0, 6), Justification::centred, ff::ink, 17.0f);
-    ff::label (g, smallText, b.toNearestInt().withTrimmedTop ((int) (b.getHeight() * 0.55f)).translated (0, -4), Justification::centred, ff::dim, 11.0f);
+    // two lines centred as a pair, whatever the button's height
+    const float big = b.getHeight() < 50.0f ? 15.0f : 17.0f, small = b.getHeight() < 50.0f ? 10.5f : 11.0f;
+    const float top = b.getCentreY() - (big + small + 2.0f) * 0.5f;
+    ff::label (g, mainText, Rectangle<float> (b.getX(), top, b.getWidth(), big).toNearestInt(), Justification::centred, ff::ink, big);
+    ff::label (g, smallText, Rectangle<float> (b.getX(), top + big + 2.0f, b.getWidth(), small).toNearestInt(), Justification::centred, ff::dim, small);
 }
 
 void BigButton::mouseDown (const MouseEvent& e)
@@ -853,8 +856,37 @@ PrismEditor::PrismEditor (PrismProcessor& p)
     }
     for (auto* c : std::initializer_list<Component*> { &inputMode, &tempoCard, &sync, &viewMain, &viewDeep, &viewPedal,
                                                        &pebble, &gestureButton, &captureButton, &bypassButton, &captureBar, &mix,
-                                                       &presetCard, &bankA, &bankB, &bankC, &bankD, &expression })
+                                                       &presetCard, &bankA, &bankB, &bankC, &bankD, &expression,
+                                                       &keepButton, &contextCard })
         addAndMakeVisible (c);
+
+    // Keeper: click to log the moment, right-click for notes, export and the folder
+    keepButton.set ("KEEP", "HOLD C+D", ff::line);
+    keepButton.onDown = [this] { proc.keepNow(); };
+    keepButton.onRightClick = [this] { keeperMenu(); };
+    contextCard.setTextHeight (12.0f);
+    contextCard.setMouseCursor (MouseCursor::PointingHandCursor);
+    contextCard.setValue (proc.keeperLive() ? "LIVE" : "STUDIO");
+    contextCard.onClick = [this] (const MouseEvent&)
+    {
+        proc.setKeeperLive (! proc.keeperLive());
+        contextCard.setValue (proc.keeperLive() ? "LIVE" : "STUDIO");
+        proc.uiMessage = proc.keeperLive() ? "LIVE" : "STUDIO";
+        proc.uiMessageAt = Time::getMillisecondCounterHiRes() * 0.001;
+    };
+    addChildComponent (noteEditor);
+    noteEditor.setTextToShowWhenEmpty ("Optional, Enter to save", ff::faint);
+    noteEditor.setFont (FontOptions (13.0f));
+    noteEditor.setIndents (10, 8);
+    noteEditor.setColour (TextEditor::backgroundColourId, ff::bg);
+    noteEditor.setColour (TextEditor::textColourId, ff::ink);
+    noteEditor.setColour (TextEditor::outlineColourId, ff::line);
+    noteEditor.setColour (TextEditor::focusedOutlineColourId, ff::ink);
+    noteEditor.setColour (CaretComponent::caretColourId, ff::ink);
+    noteEditor.setInputRestrictions (200);
+    noteEditor.onReturnKey = [this] { closeNote (true); };
+    noteEditor.onEscapeKey = [this] { closeNote (false); };
+    noteEditor.onTextChange = [this] { noteUntil = Time::getMillisecondCounterHiRes() * 0.001 + 20.0; };
 
     tempoCard.setTextHeight (22.0f);
     tempoCard.setMouseCursor (MouseCursor::PointingHandCursor);
@@ -942,6 +974,45 @@ void PrismEditor::presetMenu()
 
 void PrismEditor::mouseDown (const MouseEvent&) { proc.touchKnob ({}); }
 
+void PrismEditor::keeperMenu()
+{
+    PopupMenu m;
+    m.addItem (1, "Add a note to Keeper No. " + String (proc.lastKeeper()), proc.lastKeeper() > 0);
+    m.addItem (2, "Export for Claude");
+    m.addItem (3, "Open the Keepers folder");
+    m.addSeparator();
+    m.addItem (4, "Learn a Keeper footswitch");
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&keepButton), [this] (int r)
+    {
+        if (r == 1)
+        {
+            noteNumber = proc.lastKeeper();
+            noteEditor.clear();
+            noteEditor.setVisible (true);
+            noteEditor.grabKeyboardFocus();
+            noteUntil = Time::getMillisecondCounterHiRes() * 0.001 + 20.0;
+            repaint (150, 500, 200, 80);
+        }
+        else if (r == 2) proc.exportKeepers();
+        else if (r == 3) proc.openKeepersFolder();
+        else if (r == 4) proc.learnKeeper();
+    });
+}
+
+void PrismEditor::closeNote (bool save)
+{
+    if (save) proc.addKeeperNote (noteNumber, noteEditor.getText());
+    if (save && noteEditor.getText().trim().isNotEmpty())
+    {
+        proc.uiMessage = "NOTED";
+        proc.uiMessageAt = Time::getMillisecondCounterHiRes() * 0.001;
+    }
+    noteEditor.setVisible (false);
+    noteEditor.clear();
+    noteUntil = 0.0;
+    repaint (150, 500, 200, 80);
+}
+
 void PrismEditor::paint (Graphics& g)
 {
     g.fillAll (ff::bg);
@@ -954,12 +1025,17 @@ void PrismEditor::paint (Graphics& g)
 
     g.setColour (ff::face);
     g.fillRoundedRectangle (20.0f, 492.0f, 1220.0f, 152.0f, 12.0f);
-    ff::label (g, "PEBBLE", { 150, 510, 176, 18 });
-    ff::label (g, mood, { 150, 528, 182, 32 }, Justification::centredLeft, ff::ink, 22.0f);
-    ff::label (g, moodSub, { 150, 560, 182, 16 }, Justification::centredLeft, ff::dim, 12.0f);
-    ff::label (g, captureText, { 336, 600, 274, 18 }, Justification::centredLeft, ff::dim, 12.0f);
-    ff::label (g, "PRESET", { 770, 510, 110, 18 });
-    ff::label (g, "FOOTSWITCHES", { 900, 510, 180, 18 });
+    if (noteEditor.isVisible())
+        ff::label (g, "KEPT No. " + String (noteNumber) + String::fromUTF8 (" · ADD A NOTE?"), { 156, 508, 180, 18 }, Justification::centredLeft, ff::ink, 12.0f);
+    else
+    {
+        ff::label (g, "PEBBLE", { 156, 506, 180, 18 });
+        ff::label (g, mood, { 156, 524, 180, 32 }, Justification::centredLeft, ff::ink, 22.0f);
+        ff::label (g, moodSub, { 156, 556, 180, 16 }, Justification::centredLeft, ff::dim, 12.0f);
+    }
+    ff::label (g, captureText, { 360, 602, 260, 18 }, Justification::centredLeft, ff::dim, 12.0f);
+    ff::label (g, "PRESET", { 782, 510, 110, 18 });
+    ff::label (g, "FOOTSWITCHES", { 910, 510, 180, 18 });
 }
 
 void PrismEditor::resized()
@@ -967,25 +1043,29 @@ void PrismEditor::resized()
     inputMode.setBounds (534, 24, 210, 32);
     tempoCard.setBounds (822, 20, 80, 40);
     sync.setBounds (912, 24, 66, 32);
-    viewMain.setBounds (1000, 24, 76, 32);
-    viewDeep.setBounds (1082, 24, 76, 32);
-    viewPedal.setBounds (1164, 24, 76, 32);
+    viewMain.setBounds (996, 24, 74, 32);
+    viewDeep.setBounds (1081, 24, 74, 32);
+    viewPedal.setBounds (1166, 24, 74, 32);
     layoutModules();
 
-    pebble.setBounds (28, 504, 116, 124);
-    gestureButton.setBounds (336, 512, 132, 58);
-    captureButton.setBounds (478, 512, 132, 58);
-    captureBar.setBounds (336, 584, 274, 10);
-    mix.setBounds (630, 498, 122, 140);
-    presetCard.setBounds (770, 532, 110, 52);
-    const int bw = 24;
-    bankA.setBounds (770, 596, bw, 26);
-    bankB.setBounds (770 + (bw + 4), 596, bw, 26);
-    bankC.setBounds (770 + 2 * (bw + 4), 596, bw, 26);
-    bankD.setBounds (770 + 3 * (bw + 4), 596, bw, 26);
-    for (int k = 0; k < 4; ++k) minis[(size_t) k]->setBounds (900 + k * 46, 532, 34, 34);
-    expression.setBounds (900, 576, 182, 46);
-    bypassButton.setBounds (1100, 532, 124, 64);
+    // the strip: at least 10 px between buttons in a group, 24 px between groups
+    pebble.setBounds (30, 504, 112, 120);
+    keepButton.setBounds (156, 586, 100, 44);
+    contextCard.setBounds (268, 586, 68, 44);
+    noteEditor.setBounds (156, 530, 180, 32);
+    gestureButton.setBounds (360, 512, 124, 58);
+    captureButton.setBounds (496, 512, 124, 58);
+    captureBar.setBounds (360, 586, 260, 10);
+    mix.setBounds (644, 498, 114, 140);
+    presetCard.setBounds (782, 532, 104, 52);
+    const int bw = 20, bg = 8;
+    bankA.setBounds (782, 598, bw, 24);
+    bankB.setBounds (782 + (bw + bg), 598, bw, 24);
+    bankC.setBounds (782 + 2 * (bw + bg), 598, bw, 24);
+    bankD.setBounds (782 + 3 * (bw + bg), 598, bw, 24);
+    for (int k = 0; k < 4; ++k) minis[(size_t) k]->setBounds (910 + k * 46, 532, 34, 34);
+    expression.setBounds (910, 578, 172, 46);
+    bypassButton.setBounds (1106, 532, 118, 64);
 }
 
 void PrismEditor::timerCallback()
@@ -1071,6 +1151,27 @@ void PrismEditor::timerCallback()
                                                  + String (sel % PrismProcessor::kPerBank + 1).paddedLeft ('0', 2));
     const int bank = sel < 0 ? -1 : sel / PrismProcessor::kPerBank;
     bankA.setLit (bank == 0); bankB.setLit (bank == 1); bankC.setLit (bank == 2); bankD.setLit (bank == 3);
+
+    // Keeper: flip to KEPT, Pebble nods, offer a note for ten seconds without taking the keyboard
+    contextCard.advance (dt);
+    const int kp = proc.uiKeepPulse.load();
+    if (kp != lastKeepPulse)
+    {
+        lastKeepPulse = kp;
+        keptUntil = now + 1.8;
+        contextCard.setValue ("KEPT");
+        pebble.react (ff::modY, 0.0f);
+        noteNumber = 0;
+        noteEditor.clear();
+        noteEditor.setVisible (true);
+        noteUntil = now + 10.0;
+        repaint (150, 500, 200, 80);
+    }
+    if (noteNumber == 0 && proc.lastKeeper() > 0 && noteEditor.isVisible()) { noteNumber = proc.lastKeeper(); repaint (150, 500, 200, 80); }
+    if (keptUntil > 0.0 && now > keptUntil) { keptUntil = 0.0; contextCard.setValue (proc.keeperLive() ? "LIVE" : "STUDIO"); }
+    if (noteEditor.isVisible() && now > noteUntil && ! noteEditor.hasKeyboardFocus (true)) closeNote (false);
+    keepButton.set (proc.learningWhat() == PrismProcessor::LearnKeeper ? "PRESS IT" : "KEEP",
+                    proc.learningWhat() == PrismProcessor::LearnKeeper ? "YOUR KEEPER SWITCH" : "HOLD C+D", ff::line);
 
     pebble.update (now, dt);
     captureBar.repaint();

@@ -352,6 +352,15 @@ private:
     std::array<std::unique_ptr<ui::MiniFoot>, 4> minis;
     ui::ExpressionMeter expression;
 
+    // Keeper
+    ui::BigButton keepButton;
+    ui::FlipCard contextCard;
+    juce::TextEditor noteEditor;
+    int noteNumber = 0, lastKeepPulse = 0;
+    double keptUntil = 0.0, noteUntil = 0.0;
+    void keeperMenu();
+    void closeNote (bool save);
+
     std::array<int, 4> lastFx { -1, -1, -1, -1 };
     std::array<int, 4> lastOrder { -1, -1, -1, -1 };
     int lastDeepToggle = 0;
